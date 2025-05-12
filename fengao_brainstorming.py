@@ -34,7 +34,50 @@ from PIL import Image
 import fitz  # PyMuPDF
 import requests
 import re
-from langchain_community.tools.serper_search import SerperSearchResults
+# Try importing SerperSearchResults from different possible locations
+try:
+    from langchain_community.tools.serper_search import SerperSearchResults
+    logger.info("成功导入SerperSearchResults")
+except ImportError:
+    try:
+        from langchain_community.utilities.serper_search import SerperSearchResults
+        logger.info("从utilities模块成功导入SerperSearchResults")
+    except ImportError:
+        # Create fallback implementation if SerperSearchResults is not available
+        logger.warning("无法导入SerperSearchResults，使用替代实现")
+        class SerperSearchResults:
+            """Fallback implementation of SerperSearchResults"""
+            def __init__(self, serper_api_key: str):
+                self.serper_api_key = serper_api_key
+                self.headers = {
+                    "X-API-KEY": serper_api_key,
+                    "Content-Type": "application/json"
+                }
+                self.base_url = "https://api.serper.dev/search"
+                
+            def search(self, query: str, gl="us", hl="en", num=10):
+                """Perform a search using the Serper API"""
+                try:
+                    payload = json.dumps({
+                        "q": query,
+                        "gl": gl,
+                        "hl": hl,
+                        "num": num
+                    })
+                    response = requests.post(self.base_url, headers=self.headers, data=payload)
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        return {
+                            "error": f"API returned status code {response.status_code}",
+                            "message": response.text
+                        }
+                except Exception as e:
+                    return {
+                        "error": "Search failed",
+                        "message": str(e)
+                    }
+
 from langchain_core.tools import Tool
 from langchain.agents import create_structured_chat_agent
 import asyncio
