@@ -2,6 +2,10 @@ import os
 import sys
 import logging
 
+# 初始化 Streamlit 页面配置（必须是第一个 Streamlit 命令）
+import streamlit as st
+st.set_page_config(page_title="PS助手平台", layout="wide")
+
 # 配置日志记录
 logging.basicConfig(
     level=logging.INFO,
@@ -1317,7 +1321,6 @@ def main():
     except (KeyError, FileNotFoundError):
         st.error("未找到 LANGCHAIN_API_KEY。请在 Streamlit 设置中添加此密钥。")
     
-    st.set_page_config(page_title="PS助手平台", layout="wide")
     add_custom_css()
     st.markdown("<h1 class='page-title'>PS助手平台</h1>", unsafe_allow_html=True)
     
