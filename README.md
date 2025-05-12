@@ -37,3 +37,27 @@ streamlit run fengao_brainstorming.py
 - SERPER_API_KEY
 - SMITHERY_API_KEY
 - LANGCHAIN_API_KEY 
+
+## 依赖说明
+
+该应用程序使用了多个依赖库，其中一些可能在某些环境中难以安装：
+
+### MCP (Machine Conversation Protocol)
+
+应用程序优先使用MCP连接Smithery的sequential thinking服务进行院校研究。如果MCP不可用，程序会自动使用以下备选方案：
+
+1. 首先尝试使用`mcp_fallback.py`中的简化实现
+2. 如果备选方案失败，则使用直接的LLM调用
+
+### 部署注意事项
+
+在Streamlit Cloud上部署时可能会遇到依赖问题。本代码库已经做了以下优化：
+
+1. 移除了对`langchain-callbacks-streamlit`的依赖
+2. 对MCP提供了完整的备选实现
+3. 简化了依赖关系
+
+如果在部署过程中遇到问题，请尝试：
+
+1. 首先通过`pip install -r requirements.txt`安装依赖
+2. 如果某些依赖安装失败，应用程序会自动使用备选实现 
