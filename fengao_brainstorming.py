@@ -21,7 +21,10 @@ import re
 from langchain_community.tools.serper_search import SerperSearchResults
 from langchain_core.tools import Tool
 from langchain.agents import create_structured_chat_agent
-from langchain_smithery import MCP as SmitheryMCP
+import mcp
+from mcp.client.streamable_http import streamablehttp_client
+import asyncio
+
 # 配置日志记录
 logging.basicConfig(
     level=logging.INFO,
@@ -1656,6 +1659,8 @@ def main():
 class SchoolResearchAgent:
     def __init__(self, api_key: str, serper_api_key: str, smithery_api_key: str, prompt_templates: PromptTemplates):
         self.prompt_templates = prompt_templates
+        self.smithery_api_key = smithery_api_key
+        self.serper_api_key = serper_api_key
         
         self.llm = ChatOpenAI(
             temperature=0.1,
@@ -1668,13 +1673,6 @@ class SchoolResearchAgent:
         # 设置Serper搜索工具
         self.serper_tool = SerperSearchResults(
             serper_api_key=serper_api_key
-        )
-        
-        # 使用Smithery的MCP进行结构化思考
-        self.mcp_thinking = SmitheryMCP(
-            api_key=smithery_api_key,
-            name="sequential-thinking",
-            description="Sequential Thinking is a dynamic and reflective problem-solving process that helps analyze problems through a series of thoughts that can build upon, question, or revise previous insights."
         )
         
         # 设置SearchSchoolInfo系统提示
@@ -1695,6 +1693,41 @@ class SchoolResearchAgent:
             output_key="research_result",
             verbose=True
         )
+    
+    async def run_mcp_thinking(self, task, callback_handler=None):
+        """使用Smithery MCP进行结构化思考的异步方法"""
+        # 配置信息
+        config = {
+            "serperApiKey": self.serper_api_key
+        }
+        # 编码配置为base64
+        config_b64 = base64.b64encode(json.dumps(config).encode()).decode()
+        
+        # 创建服务器URL
+        url = f"https://server.smithery.ai/@marcopesani/mcp-server-sequential-thinking/mcp?config={config_b64}&api_key={self.smithery_api_key}"
+        
+        result = ""
+        # 连接到服务器使用HTTP客户端
+        async with streamablehttp_client(url) as (read_stream, write_stream, _):
+            async with mcp.ClientSession(read_stream, write_stream) as session:
+                # 初始化连接
+                await session.initialize()
+                
+                # 执行思考任务
+                thinking_result = await session.run_tool(
+                    "sequential-thinking",
+                    {
+                        "task": task
+                    }
+                )
+                result = thinking_result
+                
+                if callback_handler:
+                    # 将结果发送到回调处理器以流式显示
+                    for token in str(result).split():  # 简单拆分为词作为token
+                        callback_handler.on_llm_new_token(token + " ", **{})
+                
+        return result
     
     def process_school_research(self, school_name: str, program_name: str) -> Dict[str, Any]:
         try:
@@ -1750,10 +1783,12 @@ class SchoolResearchAgent:
                     combined_search_results = "\n\n".join([json.dumps(result) for result in all_search_results])
                     
                     # 使用思考链进行系统的信息整合
-                    thinking_result = self.mcp_thinking(
-                        {"task": f"分析{school_name}的{program_name}专业信息，并按格式组织成院校信息汇总报告，基于以下搜索结果：\n\n{combined_search_results}"},
-                        callbacks=[QueueCallbackHandler(message_queue)]
-                    )
+                    callback_handler = QueueCallbackHandler(message_queue)
+                    # 使用asyncio运行异步MCP函数
+                    thinking_result = asyncio.run(self.run_mcp_thinking(
+                        f"分析{school_name}的{program_name}专业信息，并按格式组织成院校信息汇总报告，基于以下搜索结果：\n\n{combined_search_results}",
+                        callback_handler
+                    ))
                     
                     # 传递结果到研究链
                     result = self.research_chain(
