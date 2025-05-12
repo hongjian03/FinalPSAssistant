@@ -3,7 +3,7 @@ langchain-openai==0.0.5
 langchain==0.1.4
 langchain-community==0.0.13
 langchain-core==0.1.14
-langchain-smithery==0.0.1
+mcp-client==0.1.1
 langchain-callbacks-streamlit==0.1.0
 openai==1.12.0
 python-docx==1.0.1
