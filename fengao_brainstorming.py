@@ -99,9 +99,14 @@ try:
     import mcp
     from smithery import websocket_client
     logger.info("MCP 和 Smithery 模块已成功导入")
+    # 检查当前环境中mcp的详细情况
+    logger.info(f"MCP 模块路径: {getattr(mcp, '__file__', '未知')}")
+    logger.info(f"MCP 可用工具: {sorted([x for x in dir(mcp) if not x.startswith('_')])}")
+    if hasattr(mcp, 'client'):
+        logger.info(f"MCP client 子模块包含: {sorted([x for x in dir(mcp.client) if not x.startswith('_')])}")
     MCP_AVAILABLE = True
-except ImportError:
-    logger.info("MCP 模块不可用，将使用替代实现")
+except ImportError as e:
+    logger.info(f"MCP 模块不可用，错误信息: {str(e)}")
     MCP_AVAILABLE = False
     # 移除错误提示，以避免混淆用户
 
@@ -1333,9 +1338,9 @@ def main():
         st.warning("请设置 OPENROUTER_API_KEY 以启用完整功能。")
         st.stop()
     
-    # 不再显示MCP模块状态通知，因为我们有替代实现
-    # if not MCP_AVAILABLE:
-    #     st.warning("MCP模块不可用，部分高级功能将使用替代实现。学校研究功能可能会受到影响，但应用程序仍可运行。")
+    # 显示MCP状态，但不作为警告，只是展示信息
+    if MCP_AVAILABLE:
+        st.success("✅ MCP已连接：高级结构化思考功能已启用。")
     
     tab1, tab2 = st.tabs(["PS助手", "提示词设置"])
     
@@ -1595,6 +1600,9 @@ def main():
         with col4:
             st.markdown(f"<div class='model-info'>🤖 内容创作模型: <b>{st.session_state.content_creation_model}</b></div>", unsafe_allow_html=True)
     
+        # 显示MCP状态
+        st.markdown(f"<div class='model-info' style='background-color: {'#d1fae5' if MCP_AVAILABLE else '#fef2f2'};'>🔌 MCP状态: <b>{'已连接' if MCP_AVAILABLE else '未连接 (使用备用实现)'}</b></div>", unsafe_allow_html=True)
+    
     with tab2:
         st.title("提示词和模型设置")
         
@@ -1813,6 +1821,7 @@ class SchoolResearchAgent:
             try:
                 # 使用替代实现
                 from mcp_fallback import run_sequential_thinking
+                logger.info("使用mcp_fallback.run_sequential_thinking替代实现")
                 result = await run_sequential_thinking(
                     task, 
                     self.smithery_api_key, 
@@ -1845,6 +1854,8 @@ class SchoolResearchAgent:
                 
                 return response.content
         
+        logger.info("使用MCP进行结构化思考")
+        
         # 配置信息
         config = {
             "serperApiKey": self.serper_api_key
@@ -1854,22 +1865,29 @@ class SchoolResearchAgent:
         
         # 创建服务器URL
         url = f"https://server.smithery.ai/@marcopesani/mcp-server-sequential-thinking/mcp?config={config_b64}&api_key={self.smithery_api_key}"
+        logger.info(f"连接到Smithery服务器: {url}")
         
         result = ""
         try:
             # 连接到服务器使用HTTP客户端
+            logger.info("尝试建立websocket连接...")
             async with websocket_client(url) as (read_stream, write_stream, _):
+                logger.info("websocket连接成功，创建MCP客户端会话...")
                 async with mcp.ClientSession(read_stream, write_stream) as session:
                     # 初始化连接
+                    logger.info("初始化MCP会话...")
                     await session.initialize()
+                    logger.info("MCP会话初始化成功")
                     
                     # 执行思考任务
+                    logger.info("执行sequential-thinking工具...")
                     thinking_result = await session.run_tool(
                         "sequential-thinking",
                         {
                             "task": task
                         }
                     )
+                    logger.info("sequential-thinking执行完成")
                     result = thinking_result
                     
                     if callback_handler:
