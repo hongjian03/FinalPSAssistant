@@ -100,11 +100,50 @@ try:
     from smithery import websocket_client
     logger.info("MCP 和 Smithery 模块已成功导入")
     # 检查当前环境中mcp的详细情况
+    logger.info(f"MCP 版本: {getattr(mcp, '__version__', '未知')}")
     logger.info(f"MCP 模块路径: {getattr(mcp, '__file__', '未知')}")
     logger.info(f"MCP 可用工具: {sorted([x for x in dir(mcp) if not x.startswith('_')])}")
     if hasattr(mcp, 'client'):
         logger.info(f"MCP client 子模块包含: {sorted([x for x in dir(mcp.client) if not x.startswith('_')])}")
-    MCP_AVAILABLE = True
+    
+    # 尝试执行一个简单的MCP连接测试
+    try:
+        logger.info("尝试进行MCP连接测试...")
+        import asyncio
+        
+        async def test_mcp_connection():
+            try:
+                test_url = "https://server.smithery.ai/@smithery/ping-test-service/mcp"
+                logger.info(f"尝试连接到测试服务: {test_url}")
+                
+                async with websocket_client(test_url) as (read_stream, write_stream, _):
+                    logger.info("已建立websocket连接")
+                    async with mcp.ClientSession(read_stream, write_stream) as session:
+                        logger.info("已创建MCP客户端会话")
+                        await session.initialize()
+                        logger.info("MCP会话初始化成功")
+                        # 尝试ping测试
+                        logger.info("尝试执行ping测试...")
+                        response = await session.request("ping", {})
+                        logger.info(f"Ping测试响应: {response}")
+                        logger.info("MCP连接测试成功！")
+                        return True
+            except Exception as e:
+                logger.error(f"MCP连接测试失败: {str(e)}")
+                return False
+        
+        # 尝试运行测试函数
+        try:
+            connection_test_result = asyncio.run(test_mcp_connection())
+            logger.info(f"MCP连接测试结果: {'成功' if connection_test_result else '失败'}")
+            # 只有在连接测试成功时才设置MCP_AVAILABLE为True
+            MCP_AVAILABLE = connection_test_result
+        except Exception as e:
+            logger.error(f"运行MCP连接测试时出错: {str(e)}")
+            MCP_AVAILABLE = False
+    except Exception as connection_test_error:
+        logger.error(f"设置MCP连接测试时出错: {str(connection_test_error)}")
+        MCP_AVAILABLE = False
 except ImportError as e:
     logger.info(f"MCP 模块不可用，错误信息: {str(e)}")
     MCP_AVAILABLE = False
