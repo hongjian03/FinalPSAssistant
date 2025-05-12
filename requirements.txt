@@ -23,3 +23,5 @@ typing-extensions
 sqlalchemy
 altair
 websockets
+mcp>=1.6.0
+smithery>=0.1.3
