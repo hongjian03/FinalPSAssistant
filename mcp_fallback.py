@@ -1,105 +1,78 @@
-import asyncio
-import websockets
-import json
-import base64
+"""
+简化版MCP顺序思考工具的替代实现
+"""
+
 import logging
-import aiohttp
-import requests
-from typing import Dict, Any, Callable, Optional, Tuple
+import json
+from typing import Dict, Any, Callable, Optional
+from langchain_openai import ChatOpenAI
+from langchain.schema import HumanMessage, SystemMessage
+from langchain.callbacks.base import BaseCallbackHandler
 
 logger = logging.getLogger(__name__)
 
-# 尝试导入smithery_fallback模块
-try:
-    from smithery_fallback import run_sequential_thinking as smithery_run_sequential_thinking
-    SMITHERY_FALLBACK_AVAILABLE = True
-    logger.info("已加载 Smithery 替代实现")
-except ImportError:
-    SMITHERY_FALLBACK_AVAILABLE = False
-    logger.warning("无法导入 Smithery 替代实现，将使用基本替代方案")
-
-class ClientSession:
-    """
-    A fallback implementation of the mcp.ClientSession for the specific use case 
-    in the application where it's being used with the Smithery API.
-    """
-    
-    def __init__(self, read_stream=None, write_stream=None):
-        self.read_stream = read_stream
-        self.write_stream = write_stream
-        self.initialized = False
-    
-    async def initialize(self):
-        """Initialize the session"""
-        self.initialized = True
-        return True
-    
-    async def run_tool(self, tool_name: str, params: Dict[str, Any]) -> Any:
-        """
-        This is a simplified fallback implementation that directly calls the OpenAI API
-        to process sequential thinking tasks without using MCP.
-        """
-        if tool_name == "sequential-thinking":
-            # For sequential-thinking, we'll use a basic approach
-            task = params.get("task", "")
-            
-            # 使用基本替代消息
-            result = f"FALLBACK MODE: Using alternative implementation for sequential thinking.\nTask: {task}"
-            
-            # 这里我们不返回具体结果，因为这个方法不会真的被调用到
-            # 实际调用会通过run_sequential_thinking函数进行
-            return result
-        
-        return "FALLBACK MODE: Unable to use MCP. Please check your installation."
-
-async def streamablehttp_client(url: str) -> Tuple[Any, Any, Any]:
-    """
-    A fallback implementation of streamablehttp_client.
-    
-    Returns dummy stream objects and a None response.
-    """
-    class DummyStream:
-        async def read(self, n=-1):
-            return b""
-        
-        async def write(self, data):
-            pass
-        
-        async def close(self):
-            pass
-    
-    read_stream = DummyStream()
-    write_stream = DummyStream()
-    return read_stream, write_stream, None
-
-# Alternative implementation for the sequential thinking functionality
 async def run_sequential_thinking(task: str, api_key: str, callback: Optional[Callable] = None) -> str:
     """
-    Alternative implementation that uses direct API calls instead of MCP.
+    使用直接LLM调用替代MCP的顺序思考功能的简单实现
     
     Args:
-        task: The task description
-        api_key: The OpenAI API key
-        callback: Optional callback for token streaming
+        task: 思考任务
+        api_key: API密钥
+        callback: 用于流式输出的回调函数
     
     Returns:
-        The thinking result as a string
+        思考结果
     """
-    if SMITHERY_FALLBACK_AVAILABLE:
-        try:
-            # 使用我们的Smithery替代实现
-            result = await smithery_run_sequential_thinking(task, api_key, callback)
-            return result
-        except Exception as e:
-            logger.error(f"使用Smithery替代实现出错: {str(e)}")
-            if callback:
-                callback(f"使用Smithery替代实现出错: {str(e)}\n使用基本替代方案...\n")
-    
-    # 如果Smithery替代实现不可用或出错，使用基本替代方案
-    result = f"替代方案：无法使用MCP进行结构化思考。\n\n任务: {task}\n\n请检查您的API密钥和MCP安装。"
-    
+    # 创建回调处理器
+    callback_handler = None
     if callback:
-        for token in result.split():
-            callback(token + " ")
+        class TokenCallbackHandler(BaseCallbackHandler):
+            def on_llm_new_token(self, token: str, **kwargs) -> None:
+                callback(token)
+        
+        callback_handler = TokenCallbackHandler()
     
-    return result 
+    try:
+        # 创建模型
+        chat = ChatOpenAI(
+            temperature=0.1,
+            model="anthropic/claude-3-haiku-20240307",
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            streaming=True
+        )
+        
+        # 创建消息
+        messages = [
+            SystemMessage(content="""
+            你是一位擅长结构化分析和逐步思考的助手。面对复杂任务，你会按照以下步骤进行思考：
+            
+            1. 分解问题：将大问题分解为可管理的小步骤
+            2. 确定关键信息：识别任务中最重要的信息点
+            3. 逻辑推理：分析各个部分之间的关系，形成连贯的思考过程
+            4. 综合结论：基于前面的分析得出合理的结论
+            5. 最终方案：提出具体、可执行的方案
+            
+            请保持你的思考过程清晰、条理、逻辑性强，使用分步骤的方式表达你的思考过程。
+            避免跳跃性思维，确保每一步逻辑都是前一步的自然延伸。
+            """),
+            HumanMessage(content=task)
+        ]
+        
+        # 调用模型
+        response = await chat.ainvoke(
+            messages,
+            callbacks=[callback_handler] if callback_handler else None
+        )
+        
+        return response.content
+        
+    except Exception as e:
+        logger.error(f"替代实现错误: {str(e)}")
+        error_message = f"替代实现错误: {str(e)}"
+        
+        if callback:
+            for token in error_message.split():
+                callback(token + " ")
+        
+        return error_message 
