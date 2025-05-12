@@ -4,12 +4,30 @@
 
 import logging
 import json
+import os
 from typing import Dict, Any, Callable, Optional
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.callbacks.base import BaseCallbackHandler
 
 logger = logging.getLogger(__name__)
+
+# 环境变量控制
+FORCE_FALLBACK = os.environ.get("FORCE_FALLBACK", "false").lower() == "true"
+if FORCE_FALLBACK:
+    logger.info("检测到 FORCE_FALLBACK=true 环境变量，将强制使用替代实现")
+
+# 测试函数，用于检查MCP功能是否可用
+def test_mcp_availability():
+    """测试MCP库是否可用"""
+    try:
+        import mcp
+        from smithery import websocket_client
+        logger.info("成功导入MCP和Smithery模块")
+        return True
+    except ImportError as e:
+        logger.warning(f"无法导入MCP或Smithery: {str(e)}")
+        return False
 
 async def run_sequential_thinking(task: str, api_key: str, callback: Optional[Callable] = None) -> str:
     """
