@@ -97,13 +97,13 @@ from docx import Document
 # 导入 MCP 模块
 try:
     import mcp
-    from mcp.client.streamable_http import streamablehttp_client
-    logger.info("MCP 模块已成功导入")
+    from smithery import websocket_client
+    logger.info("MCP 和 Smithery 模块已成功导入")
     MCP_AVAILABLE = True
 except ImportError:
-    logger.error("MCP 模块导入失败，请安装 MCP: pip install mcp")
-    st.error("缺少 MCP 模块，某些功能可能不可用。请运行 pip install mcp 安装所需依赖。")
+    logger.info("MCP 模块不可用，将使用替代实现")
     MCP_AVAILABLE = False
+    # 移除错误提示，以避免混淆用户
 
 # 导入替代实现
 if not MCP_AVAILABLE:
@@ -111,7 +111,7 @@ if not MCP_AVAILABLE:
         from smithery_fallback import run_sequential_thinking
         logger.info("已加载 Smithery 替代实现")
     except ImportError:
-        logger.warning("无法导入 Smithery 替代实现，某些功能可能不可用")
+        logger.warning("无法导入 Smithery 替代实现，将使用基本实现")
 
 # 应用 nest_asyncio 避免在Streamlit中运行asyncio时的问题
 nest_asyncio.apply()
@@ -1333,9 +1333,9 @@ def main():
         st.warning("请设置 OPENROUTER_API_KEY 以启用完整功能。")
         st.stop()
     
-    # 显示模块状态通知
-    if not MCP_AVAILABLE:
-        st.warning("MCP模块不可用，部分高级功能将使用替代实现。学校研究功能可能会受到影响，但应用程序仍可运行。")
+    # 不再显示MCP模块状态通知，因为我们有替代实现
+    # if not MCP_AVAILABLE:
+    #     st.warning("MCP模块不可用，部分高级功能将使用替代实现。学校研究功能可能会受到影响，但应用程序仍可运行。")
     
     tab1, tab2 = st.tabs(["PS助手", "提示词设置"])
     
@@ -1858,7 +1858,7 @@ class SchoolResearchAgent:
         result = ""
         try:
             # 连接到服务器使用HTTP客户端
-            async with streamablehttp_client(url) as (read_stream, write_stream, _):
+            async with websocket_client(url) as (read_stream, write_stream, _):
                 async with mcp.ClientSession(read_stream, write_stream) as session:
                     # 初始化连接
                     await session.initialize()
