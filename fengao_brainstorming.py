@@ -106,53 +106,144 @@ try:
     if hasattr(mcp, 'client'):
         logger.info(f"MCP client 子模块包含: {sorted([x for x in dir(mcp.client) if not x.startswith('_')])}")
     
-    # 尝试执行一个简单的MCP连接测试
-    try:
-        logger.info("尝试进行MCP连接测试...")
-        import asyncio
-        
-        async def test_mcp_connection():
-            try:
-                test_url = "https://server.smithery.ai/@smithery/ping-test-service/mcp"
-                logger.info(f"尝试连接到测试服务: {test_url}")
-                
-                async with websocket_client(test_url) as (read_stream, write_stream, _):
-                    logger.info("已建立websocket连接")
-                    async with mcp.ClientSession(read_stream, write_stream) as session:
-                        logger.info("已创建MCP客户端会话")
-                        await session.initialize()
-                        logger.info("MCP会话初始化成功")
-                        # 尝试ping测试
-                        logger.info("尝试执行ping测试...")
-                        response = await session.request("ping", {})
-                        logger.info(f"Ping测试响应: {response}")
-                        logger.info("MCP连接测试成功！")
-                        return True
-            except Exception as e:
-                logger.error(f"MCP连接测试失败: {str(e)}")
-                return False
-        
-        # 尝试运行测试函数
-        try:
-            connection_test_result = asyncio.run(test_mcp_connection())
-            logger.info(f"MCP连接测试结果: {'成功' if connection_test_result else '失败'}")
-            # 只有在连接测试成功时才设置MCP_AVAILABLE为True
-            MCP_AVAILABLE = connection_test_result
-        except Exception as e:
-            logger.error(f"运行MCP连接测试时出错: {str(e)}")
-            MCP_AVAILABLE = False
-    except Exception as connection_test_error:
-        logger.error(f"设置MCP连接测试时出错: {str(connection_test_error)}")
+    # 检查是否应该强制使用备用实现
+    import os
+    FORCE_FALLBACK = os.environ.get("FORCE_FALLBACK", "false").lower() == "true"
+    
+    if FORCE_FALLBACK:
+        logger.info("检测到 FORCE_FALLBACK=true 环境变量，将强制使用替代实现")
         MCP_AVAILABLE = False
+    else:
+        # 尝试执行一个简单的MCP连接测试
+        try:
+            logger.info("尝试进行MCP连接测试...")
+            import asyncio
+            import socket
+            import traceback
+            
+            # 测试网络连接性
+            def test_connectivity(host, port):
+                try:
+                    socket_obj = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    socket_obj.settimeout(5)
+                    result = socket_obj.connect_ex((host, port))
+                    socket_obj.close()
+                    if result == 0:
+                        return True
+                    else:
+                        logger.error(f"连接到 {host}:{port} 失败，错误代码: {result}")
+                        return False
+                except Exception as e:
+                    logger.error(f"连接测试异常: {str(e)}")
+                    return False
+            
+            # 测试 smithery.ai 连接性
+            server_host = "server.smithery.ai"
+            logger.info(f"测试与 {server_host} 的连接...")
+            if not test_connectivity(server_host, 443):
+                logger.error(f"无法连接到 {server_host}:443，可能有防火墙限制")
+                MCP_AVAILABLE = False
+            else:
+                logger.info(f"成功连接到 {server_host}:443")
+                
+                # 检查API密钥格式
+                try:
+                    import requests
+                    
+                    # 首先检查API密钥是否为空
+                    try:
+                        smithery_api_key = st.secrets["SMITHERY_API_KEY"]
+                        if not smithery_api_key:
+                            logger.error("Smithery API密钥为空")
+                            MCP_AVAILABLE = False
+                        else:
+                            # 检查API密钥格式是否符合预期
+                            if not smithery_api_key.startswith("sm-"):
+                                logger.warning("Smithery API密钥格式可能不正确，正确的格式通常以'sm-'开头")
+                                
+                            # 如果测试成功连接到服务器，设置MCP为可用
+                            async def test_mcp_connection():
+                                try:
+                                    test_url = "https://server.smithery.ai/@smithery/ping-test-service/mcp"
+                                    logger.info(f"尝试连接到测试服务: {test_url}")
+                                    
+                                    try:
+                                        logger.info("尝试建立websocket连接...")
+                                        async with websocket_client(test_url) as (read_stream, write_stream, _):
+                                            logger.info("已建立websocket连接")
+                                            try:
+                                                logger.info("创建MCP客户端会话...")
+                                                async with mcp.ClientSession(read_stream, write_stream) as session:
+                                                    logger.info("已创建MCP客户端会话")
+                                                    try:
+                                                        logger.info("初始化MCP会话...")
+                                                        await session.initialize()
+                                                        logger.info("MCP会话初始化成功")
+                                                        
+                                                        try:
+                                                            # 尝试ping测试
+                                                            logger.info("尝试执行ping测试...")
+                                                            response = await session.request("ping", {})
+                                                            logger.info(f"Ping测试响应: {response}")
+                                                            logger.info("MCP连接测试成功！")
+                                                            return True
+                                                        except Exception as ping_error:
+                                                            logger.error(f"Ping测试失败: {str(ping_error)}")
+                                                            logger.error(traceback.format_exc())
+                                                            return False
+                                                    except Exception as init_error:
+                                                        logger.error(f"MCP会话初始化失败: {str(init_error)}")
+                                                        logger.error(traceback.format_exc())
+                                                        return False
+                                            except Exception as session_error:
+                                                logger.error(f"创建MCP客户端会话失败: {str(session_error)}")
+                                                logger.error(traceback.format_exc())
+                                                return False
+                                    except Exception as websocket_error:
+                                        logger.error(f"建立websocket连接失败: {str(websocket_error)}")
+                                        logger.error(traceback.format_exc())
+                                        return False
+                                except Exception as e:
+                                    logger.error(f"MCP连接测试失败: {str(e)}")
+                                    logger.error(traceback.format_exc())
+                                    return False
+                                
+                            # 尝试运行测试函数
+                            try:
+                                logger.info("运行MCP连接测试...")
+                                connection_test_result = asyncio.run(test_mcp_connection())
+                                logger.info(f"MCP连接测试结果: {'成功' if connection_test_result else '失败'}")
+                                # 只有在连接测试成功时才设置MCP_AVAILABLE为True
+                                MCP_AVAILABLE = connection_test_result
+                                if not connection_test_result:
+                                    logger.info("将使用替代实现")
+                            except Exception as e:
+                                logger.error(f"运行MCP连接测试时出错: {str(e)}")
+                                logger.error(traceback.format_exc())
+                                MCP_AVAILABLE = False
+                    except (KeyError, FileNotFoundError):
+                        logger.error("未找到Smithery API密钥配置")
+                        MCP_AVAILABLE = False
+                except Exception as e:
+                    logger.error(f"API密钥检查过程中出错: {str(e)}")
+                    MCP_AVAILABLE = False
+        except Exception as connection_test_error:
+            logger.error(f"设置MCP连接测试时出错: {str(connection_test_error)}")
+            MCP_AVAILABLE = False
 except ImportError as e:
     logger.info(f"MCP 模块不可用，错误信息: {str(e)}")
     MCP_AVAILABLE = False
-    # 移除错误提示，以避免混淆用户
+
+# 检查是否存在环境变量 DISABLE_MCP=true
+import os
+if os.environ.get("DISABLE_MCP", "false").lower() == "true":
+    logger.info("检测到 DISABLE_MCP=true 环境变量，将禁用MCP")
+    MCP_AVAILABLE = False
 
 # 导入替代实现
 if not MCP_AVAILABLE:
     try:
-        from smithery_fallback import run_sequential_thinking
+        from mcp_fallback import run_sequential_thinking
         logger.info("已加载 Smithery 替代实现")
     except ImportError:
         logger.warning("无法导入 Smithery 替代实现，将使用基本实现")
