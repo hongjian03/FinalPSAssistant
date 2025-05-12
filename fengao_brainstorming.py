@@ -1,3 +1,13 @@
+import os
+import sys
+
+# 强制替换 sqlite3 - 为了确保streamlit cloud上正常工作
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    pass
+
 import streamlit as st
 import json
 from langchain_openai import ChatOpenAI
@@ -6,11 +16,8 @@ from langchain.schema import HumanMessage, SystemMessage
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.callbacks.streamlit import StreamlitCallbackHandler
 from langchain.chains import SequentialChain, LLMChain
-import os
 from typing import Dict, Any, List
 import logging
-import sys
-from docx import Document
 import io
 import base64
 from PyPDF2 import PdfReader
@@ -24,6 +31,17 @@ from langchain.agents import create_structured_chat_agent
 import mcp
 from mcp.client.streamable_http import streamablehttp_client
 import asyncio
+import nest_asyncio
+from queue import Queue
+from threading import Thread
+import time
+from queue import Empty
+from langchain.callbacks.base import BaseCallbackHandler
+from markitdown import MarkItDown
+from docx import Document
+
+# 应用 nest_asyncio 避免在Streamlit中运行asyncio时的问题
+nest_asyncio.apply()
 
 # 配置日志记录
 logging.basicConfig(
@@ -33,13 +51,8 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-from queue import Queue
-from threading import Thread
-import time
-from queue import Empty
+
 logger = logging.getLogger(__name__)
-from langchain.callbacks.base import BaseCallbackHandler
-from markitdown import MarkItDown
 
 # 记录程序启动
 logger.info("程序开始运行")
@@ -48,8 +61,6 @@ logger.info("程序开始运行")
 if 'sqlite_setup_done' not in st.session_state:
     try:
         logger.info("尝试设置 SQLite")
-        __import__('pysqlite3')
-        sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
         st.session_state.sqlite_setup_done = True
         logger.info("SQLite 设置成功")
     except Exception as e:
@@ -1128,6 +1139,18 @@ def initialize_session_state():
     if 'content_creation_model' not in st.session_state:
         st.session_state.content_creation_model = "qwen/qwen-max"
     
+    # 初始化成绩单分析模型
+    if 'transcript_model' not in st.session_state:
+        st.session_state.transcript_model = "qwen/qwen-max"
+    
+    # 初始化简化器模型
+    if 'simplifier_model' not in st.session_state:
+        st.session_state.simplifier_model = "qwen/qwen-max"
+        
+    # 初始化内容模型
+    if 'content_model' not in st.session_state:
+        st.session_state.content_model = "qwen/qwen-max"
+    
     # 初始化会话状态变量
     if 'school_name' not in st.session_state:
         st.session_state.school_name = ""
@@ -1211,13 +1234,30 @@ def main():
     initialize_session_state()
     
     # 设置API密钥
-    openrouter_api_key = st.secrets["OPENROUTER_API_KEY"]
-    serper_api_key = st.secrets["SERPER_API_KEY"]
-    smithery_api_key = st.secrets["SMITHERY_API_KEY"]
+    try:
+        openrouter_api_key = st.secrets["OPENROUTER_API_KEY"]
+    except (KeyError, FileNotFoundError):
+        st.error("未找到 OPENROUTER_API_KEY。请在 Streamlit 设置中添加此密钥。")
+        openrouter_api_key = ""
     
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
-    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
-    os.environ["LANGCHAIN_PROJECT"] = "PS助手平台"
+    try:
+        serper_api_key = st.secrets["SERPER_API_KEY"]
+    except (KeyError, FileNotFoundError):
+        st.error("未找到 SERPER_API_KEY。请在 Streamlit 设置中添加此密钥。")
+        serper_api_key = ""
+    
+    try:
+        smithery_api_key = st.secrets["SMITHERY_API_KEY"]
+    except (KeyError, FileNotFoundError):
+        st.error("未找到 SMITHERY_API_KEY。请在 Streamlit 设置中添加此密钥。")
+        smithery_api_key = ""
+    
+    try:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+        os.environ["LANGCHAIN_PROJECT"] = "PS助手平台"
+    except (KeyError, FileNotFoundError):
+        st.error("未找到 LANGCHAIN_API_KEY。请在 Streamlit 设置中添加此密钥。")
     
     st.set_page_config(page_title="PS助手平台", layout="wide")
     add_custom_css()
@@ -1226,6 +1266,11 @@ def main():
     # 初始化PromptTemplates
     if 'prompt_templates' not in st.session_state:
         st.session_state.prompt_templates = PromptTemplates()
+    
+    # 检查API密钥是否已设置
+    if not openrouter_api_key:
+        st.warning("请设置 OPENROUTER_API_KEY 以启用完整功能。")
+        st.stop()
     
     tab1, tab2 = st.tabs(["PS助手", "提示词设置"])
     
