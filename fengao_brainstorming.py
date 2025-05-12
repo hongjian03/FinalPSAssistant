@@ -1,10 +1,14 @@
+import streamlit as st
+# 初始化 Streamlit 页面配置（必须是第一个 Streamlit 命令）
+st.set_page_config(
+    page_title="PS助手平台",
+    page_icon="📝",
+    layout="wide"
+)
+
 import os
 import sys
 import logging
-
-# 初始化 Streamlit 页面配置（必须是第一个 Streamlit 命令）
-import streamlit as st
-st.set_page_config(page_title="PS助手平台", layout="wide")
 
 # 配置日志记录
 logging.basicConfig(
@@ -23,7 +27,6 @@ try:
 except ImportError:
     pass
 
-import streamlit as st
 import json
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
@@ -130,6 +133,16 @@ try:
                     # 检查API密钥格式
                     if not smithery_api_key.startswith("sm-"):
                         logger.warning("Smithery API密钥格式可能不正确，正确的格式通常以'sm-'开头")
+                    
+                    # 导入必要的MCP模块
+                    try:
+                        from mcp.client.streamable_http import streamablehttp_client
+                        logger.info("成功导入 streamablehttp_client")
+                    except ImportError:
+                        logger.warning("无法导入 streamablehttp_client，尝试使用 create_client API")
+                        MCP_AVAILABLE = False
+                        st.session_state.mcp_error = "无法导入 streamablehttp_client 模块"
+                        raise ImportError("无法导入 streamablehttp_client 模块")
                     
                     # 测试MCP连接
                     async def test_mcp_connection():
@@ -1406,12 +1419,6 @@ def initialize_session_state():
 
 def main():
     """主应用程序入口点"""
-    st.set_page_config(
-        page_title="PS助手平台",
-        page_icon="📝",
-        layout="wide"
-    )
-    
     # 初始化日志
     setup_logging()
     
