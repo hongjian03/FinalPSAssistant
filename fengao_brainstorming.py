@@ -1,5 +1,16 @@
 import os
 import sys
+import logging
+
+# 配置日志记录
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # 强制替换 sqlite3 - 为了确保streamlit cloud上正常工作
 try:
@@ -17,7 +28,6 @@ from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.callbacks.streamlit import StreamlitCallbackHandler
 from langchain.chains import SequentialChain, LLMChain
 from typing import Dict, Any, List
-import logging
 import io
 import base64
 from PyPDF2 import PdfReader
@@ -28,8 +38,6 @@ import re
 from langchain_community.tools.serper_search import SerperSearchResults
 from langchain_core.tools import Tool
 from langchain.agents import create_structured_chat_agent
-import mcp
-from mcp.client.streamable_http import streamablehttp_client
 import asyncio
 import nest_asyncio
 from queue import Queue
@@ -40,19 +48,69 @@ from langchain.callbacks.base import BaseCallbackHandler
 from markitdown import MarkItDown
 from docx import Document
 
+# 尝试导入 mcp 模块，如果不可用则使用我们的替代实现
+try:
+    import mcp
+    from mcp.client.streamable_http import streamablehttp_client
+    MCP_AVAILABLE = True
+    logger.info("MCP 模块已成功导入")
+except ImportError:
+    logger.warning("MCP 模块导入失败，将使用替代实现")
+    
+    # 首先尝试导入我们的 mcp_fallback 模块
+    try:
+        from mcp_fallback import ClientSession as mcp_ClientSession
+        from mcp_fallback import streamablehttp_client
+        from mcp_fallback import run_sequential_thinking
+        
+        # 然后尝试导入我们的 smithery_fallback 模块（mcp_fallback会尝试使用它）
+        try:
+            import smithery_fallback
+            logger.info("Smithery 替代实现已成功导入")
+        except ImportError:
+            logger.warning("Smithery 替代实现导入失败，将使用基本替代实现")
+        
+        # 创建一个模拟的 mcp 模块
+        class MCPModule:
+            def __init__(self):
+                self.ClientSession = mcp_ClientSession
+        
+        mcp = MCPModule()
+        MCP_AVAILABLE = False
+        logger.info("已加载 MCP 替代实现")
+    except ImportError:
+        logger.error("无法加载 MCP 替代实现，某些功能可能不可用")
+        
+        # 创建最基本的占位符
+        def streamablehttp_client(url):
+            async def dummy():
+                return None, None, None
+            return dummy()
+            
+        class DummyClientSession:
+            def __init__(self, *args, **kwargs):
+                pass
+                
+            async def initialize(self):
+                return True
+                
+            async def run_tool(self, *args, **kwargs):
+                return "MCP功能不可用"
+        
+        class DummyMCPModule:
+            def __init__(self):
+                self.ClientSession = DummyClientSession
+        
+        mcp = DummyMCPModule()
+        MCP_AVAILABLE = False
+        
+        async def run_sequential_thinking(task, api_key, callback=None):
+            if callback:
+                callback("MCP功能不可用，无法执行结构化思考。")
+            return "MCP功能不可用，无法执行结构化思考。"
+
 # 应用 nest_asyncio 避免在Streamlit中运行asyncio时的问题
 nest_asyncio.apply()
-
-# 配置日志记录
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-
-logger = logging.getLogger(__name__)
 
 # 记录程序启动
 logger.info("程序开始运行")
@@ -1272,6 +1330,10 @@ def main():
         st.warning("请设置 OPENROUTER_API_KEY 以启用完整功能。")
         st.stop()
     
+    # 显示模块状态通知
+    if not MCP_AVAILABLE:
+        st.warning("MCP模块不可用，部分高级功能将使用替代实现。学校研究功能可能会受到影响，但应用程序仍可运行。")
+    
     tab1, tab2 = st.tabs(["PS助手", "提示词设置"])
     
     with tab1:
@@ -1706,6 +1768,7 @@ class SchoolResearchAgent:
         self.prompt_templates = prompt_templates
         self.smithery_api_key = smithery_api_key
         self.serper_api_key = serper_api_key
+        self.openrouter_api_key = api_key  # 存储 OpenRouter API 密钥以供回退方案使用
         
         self.llm = ChatOpenAI(
             temperature=0.1,
@@ -1741,6 +1804,17 @@ class SchoolResearchAgent:
     
     async def run_mcp_thinking(self, task, callback_handler=None):
         """使用Smithery MCP进行结构化思考的异步方法"""
+        # 检查MCP是否可用
+        if not MCP_AVAILABLE:
+            logger.warning("MCP不可用，使用替代实现")
+            # 使用替代实现
+            result = await run_sequential_thinking(
+                task, 
+                self.smithery_api_key, 
+                callback=lambda token: callback_handler.on_llm_new_token(token, **{}) if callback_handler else None
+            )
+            return result
+        
         # 配置信息
         config = {
             "serperApiKey": self.serper_api_key
@@ -1752,25 +1826,51 @@ class SchoolResearchAgent:
         url = f"https://server.smithery.ai/@marcopesani/mcp-server-sequential-thinking/mcp?config={config_b64}&api_key={self.smithery_api_key}"
         
         result = ""
-        # 连接到服务器使用HTTP客户端
-        async with streamablehttp_client(url) as (read_stream, write_stream, _):
-            async with mcp.ClientSession(read_stream, write_stream) as session:
-                # 初始化连接
-                await session.initialize()
-                
-                # 执行思考任务
-                thinking_result = await session.run_tool(
-                    "sequential-thinking",
-                    {
-                        "task": task
-                    }
-                )
-                result = thinking_result
-                
-                if callback_handler:
-                    # 将结果发送到回调处理器以流式显示
-                    for token in str(result).split():  # 简单拆分为词作为token
-                        callback_handler.on_llm_new_token(token + " ", **{})
+        try:
+            # 连接到服务器使用HTTP客户端
+            async with streamablehttp_client(url) as (read_stream, write_stream, _):
+                async with mcp.ClientSession(read_stream, write_stream) as session:
+                    # 初始化连接
+                    await session.initialize()
+                    
+                    # 执行思考任务
+                    thinking_result = await session.run_tool(
+                        "sequential-thinking",
+                        {
+                            "task": task
+                        }
+                    )
+                    result = thinking_result
+                    
+                    if callback_handler:
+                        # 将结果发送到回调处理器以流式显示
+                        for token in str(result).split():  # 简单拆分为词作为token
+                            callback_handler.on_llm_new_token(token + " ", **{})
+        except Exception as e:
+            logger.error(f"MCP服务调用失败: {str(e)}")
+            if callback_handler:
+                callback_handler.on_llm_new_token(f"MCP服务调用失败: {str(e)}\n使用备用方法...\n", **{})
+            
+            # 使用 LLM 直接处理任务
+            messages = [
+                SystemMessage(content="你是一个专业的院校研究助手，擅长分析各国大学的专业项目信息。"),
+                HumanMessage(content=task)
+            ]
+            
+            chat = ChatOpenAI(
+                temperature=0.1,
+                model="anthropic/claude-3-haiku-20240307",
+                api_key=self.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+                streaming=True
+            )
+            
+            response = chat.invoke(
+                messages,
+                callbacks=[callback_handler] if callback_handler else None
+            )
+            
+            result = response.content
                 
         return result
     
@@ -1827,13 +1927,19 @@ class SchoolResearchAgent:
                     # 整合搜索结果
                     combined_search_results = "\n\n".join([json.dumps(result) for result in all_search_results])
                     
-                    # 使用思考链进行系统的信息整合
-                    callback_handler = QueueCallbackHandler(message_queue)
-                    # 使用asyncio运行异步MCP函数
-                    thinking_result = asyncio.run(self.run_mcp_thinking(
-                        f"分析{school_name}的{program_name}专业信息，并按格式组织成院校信息汇总报告，基于以下搜索结果：\n\n{combined_search_results}",
-                        callback_handler
-                    ))
+                    try:
+                        # 使用思考链进行系统的信息整合
+                        callback_handler = QueueCallbackHandler(message_queue)
+                        # 使用asyncio运行异步MCP函数
+                        thinking_result = asyncio.run(self.run_mcp_thinking(
+                            f"分析{school_name}的{program_name}专业信息，并按格式组织成院校信息汇总报告，基于以下搜索结果：\n\n{combined_search_results}",
+                            callback_handler
+                        ))
+                        message_queue.put("\n\n思考分析完成，正在生成最终报告...\n\n")
+                    except Exception as e:
+                        logger.error(f"结构化思考过程中出错: {str(e)}")
+                        message_queue.put(f"\n\n结构化思考过程中出错: {str(e)}\n跳过结构化思考阶段，直接生成报告...\n\n")
+                        thinking_result = ""
                     
                     # 传递结果到研究链
                     result = self.research_chain(
