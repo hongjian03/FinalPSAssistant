@@ -118,121 +118,98 @@ try:
         try:
             logger.info("尝试进行MCP连接测试...")
             import asyncio
-            import socket
             import traceback
             
-            # 测试网络连接性
-            def test_connectivity(host, port):
-                try:
-                    socket_obj = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    socket_obj.settimeout(5)
-                    result = socket_obj.connect_ex((host, port))
-                    socket_obj.close()
-                    if result == 0:
-                        return True
-                    else:
-                        logger.error(f"连接到 {host}:{port} 失败，错误代码: {result}")
-                        return False
-                except Exception as e:
-                    logger.error(f"连接测试异常: {str(e)}")
-                    return False
-            
-            # 测试 smithery.ai 连接性
-            server_host = "server.smithery.ai"
-            logger.info(f"测试与 {server_host} 的连接...")
-            if not test_connectivity(server_host, 443):
-                logger.error(f"无法连接到 {server_host}:443，可能有防火墙限制")
-                MCP_AVAILABLE = False
-            else:
-                logger.info(f"成功连接到 {server_host}:443")
-                
-                # 检查API密钥格式
-                try:
-                    import requests
+            # 尝试获取API密钥
+            try:
+                smithery_api_key = st.secrets["SMITHERY_API_KEY"]
+                if not smithery_api_key:
+                    logger.error("Smithery API密钥为空")
+                    MCP_AVAILABLE = False
+                else:
+                    # 检查API密钥格式
+                    if not smithery_api_key.startswith("sm-"):
+                        logger.warning("Smithery API密钥格式可能不正确，正确的格式通常以'sm-'开头")
                     
-                    # 首先检查API密钥是否为空
-                    try:
-                        smithery_api_key = st.secrets["SMITHERY_API_KEY"]
-                        if not smithery_api_key:
-                            logger.error("Smithery API密钥为空")
-                            MCP_AVAILABLE = False
-                        else:
-                            # 检查API密钥格式是否符合预期
-                            if not smithery_api_key.startswith("sm-"):
-                                logger.warning("Smithery API密钥格式可能不正确，正确的格式通常以'sm-'开头")
-                                
-                            # 如果测试成功连接到服务器，设置MCP为可用
-                            async def test_mcp_connection():
-                                try:
-                                    test_url = "https://server.smithery.ai/@smithery/ping-test-service/mcp"
-                                    logger.info(f"尝试连接到测试服务: {test_url}")
-                                    
+                    # 测试MCP连接
+                    async def test_mcp_connection():
+                        try:
+                            # 使用ping测试服务进行简单测试
+                            test_url = f"https://server.smithery.ai/@smithery/ping-test-service/mcp?api_key={smithery_api_key}"
+                            logger.info(f"尝试连接到测试服务: {test_url[:50]}...")
+                            
+                            try:
+                                logger.info("尝试建立HTTP连接...")
+                                async with streamablehttp_client(test_url) as (read_stream, write_stream, _):
+                                    logger.info("已建立HTTP连接")
                                     try:
-                                        logger.info("尝试建立websocket连接...")
-                                        async with websocket_client(test_url) as (read_stream, write_stream, _):
-                                            logger.info("已建立websocket连接")
+                                        logger.info("创建MCP客户端会话...")
+                                        async with mcp.ClientSession(read_stream, write_stream) as session:
+                                            logger.info("已创建MCP客户端会话")
                                             try:
-                                                logger.info("创建MCP客户端会话...")
-                                                async with mcp.ClientSession(read_stream, write_stream) as session:
-                                                    logger.info("已创建MCP客户端会话")
-                                                    try:
-                                                        logger.info("初始化MCP会话...")
-                                                        await session.initialize()
-                                                        logger.info("MCP会话初始化成功")
-                                                        
-                                                        try:
-                                                            # 尝试ping测试
-                                                            logger.info("尝试执行ping测试...")
-                                                            response = await session.request("ping", {})
-                                                            logger.info(f"Ping测试响应: {response}")
-                                                            logger.info("MCP连接测试成功！")
-                                                            return True
-                                                        except Exception as ping_error:
-                                                            logger.error(f"Ping测试失败: {str(ping_error)}")
-                                                            logger.error(traceback.format_exc())
-                                                            return False
-                                                    except Exception as init_error:
-                                                        logger.error(f"MCP会话初始化失败: {str(init_error)}")
-                                                        logger.error(traceback.format_exc())
-                                                        return False
-                                            except Exception as session_error:
-                                                logger.error(f"创建MCP客户端会话失败: {str(session_error)}")
+                                                logger.info("初始化MCP会话...")
+                                                await session.initialize()
+                                                logger.info("MCP会话初始化成功")
+                                                
+                                                try:
+                                                    # 尝试ping测试
+                                                    logger.info("尝试执行ping请求...")
+                                                    response = await session.request("ping", {})
+                                                    logger.info(f"Ping测试响应: {response}")
+                                                    logger.info("MCP连接测试成功！")
+                                                    return True
+                                                except Exception as ping_error:
+                                                    logger.error(f"Ping测试失败: {str(ping_error)}")
+                                                    logger.error(traceback.format_exc())
+                                                    return False
+                                            except Exception as init_error:
+                                                logger.error(f"MCP会话初始化失败: {str(init_error)}")
                                                 logger.error(traceback.format_exc())
                                                 return False
-                                    except Exception as websocket_error:
-                                        logger.error(f"建立websocket连接失败: {str(websocket_error)}")
+                                    except Exception as session_error:
+                                        logger.error(f"创建MCP客户端会话失败: {str(session_error)}")
                                         logger.error(traceback.format_exc())
                                         return False
-                                except Exception as e:
-                                    logger.error(f"MCP连接测试失败: {str(e)}")
-                                    logger.error(traceback.format_exc())
-                                    return False
-                                
-                            # 尝试运行测试函数
-                            try:
-                                logger.info("运行MCP连接测试...")
-                                connection_test_result = asyncio.run(test_mcp_connection())
-                                logger.info(f"MCP连接测试结果: {'成功' if connection_test_result else '失败'}")
-                                # 只有在连接测试成功时才设置MCP_AVAILABLE为True
-                                MCP_AVAILABLE = connection_test_result
-                                if not connection_test_result:
-                                    logger.info("将使用替代实现")
-                            except Exception as e:
-                                logger.error(f"运行MCP连接测试时出错: {str(e)}")
+                            except Exception as conn_error:
+                                logger.error(f"建立HTTP连接失败: {str(conn_error)}")
                                 logger.error(traceback.format_exc())
-                                MCP_AVAILABLE = False
-                    except (KeyError, FileNotFoundError):
-                        logger.error("未找到Smithery API密钥配置")
+                                return False
+                        except Exception as e:
+                            logger.error(f"MCP连接测试失败: {str(e)}")
+                            logger.error(traceback.format_exc())
+                            return False
+                    
+                    # 尝试运行测试函数
+                    try:
+                        logger.info("运行MCP连接测试...")
+                        connection_test_result = asyncio.run(test_mcp_connection())
+                        logger.info(f"MCP连接测试结果: {'成功' if connection_test_result else '失败'}")
+                        # 只有在连接测试成功时才设置MCP_AVAILABLE为True
+                        MCP_AVAILABLE = connection_test_result
+                        if not connection_test_result:
+                            logger.info("将使用替代实现")
+                    except Exception as e:
+                        logger.error(f"运行MCP连接测试时出错: {str(e)}")
+                        logger.error(traceback.format_exc())
                         MCP_AVAILABLE = False
-                except Exception as e:
-                    logger.error(f"API密钥检查过程中出错: {str(e)}")
-                    MCP_AVAILABLE = False
+                        # 保存错误信息到session_state
+                        st.session_state.mcp_error = str(e)
+            except (KeyError, FileNotFoundError):
+                logger.error("未找到Smithery API密钥配置")
+                MCP_AVAILABLE = False
+                # 保存错误信息到session_state
+                st.session_state.mcp_error = "未找到Smithery API密钥配置"
         except Exception as connection_test_error:
             logger.error(f"设置MCP连接测试时出错: {str(connection_test_error)}")
             MCP_AVAILABLE = False
+            # 保存错误信息到session_state
+            st.session_state.mcp_error = str(connection_test_error)
 except ImportError as e:
     logger.info(f"MCP 模块不可用，错误信息: {str(e)}")
+    logger.warning("将使用替代实现")
     MCP_AVAILABLE = False
+    # 保存错误信息到session_state
+    st.session_state.mcp_error = f"MCP 模块导入错误: {str(e)}"
 
 # 检查是否存在环境变量 DISABLE_MCP=true
 import os
@@ -1428,481 +1405,35 @@ def initialize_session_state():
         st.session_state.simplifier_result = None
 
 def main():
-    initialize_session_state()
+    """主应用程序入口点"""
+    st.set_page_config(
+        page_title="PS助手平台",
+        page_icon="📝",
+        layout="wide"
+    )
     
-    # 设置API密钥
-    try:
-        openrouter_api_key = st.secrets["OPENROUTER_API_KEY"]
-    except (KeyError, FileNotFoundError):
-        st.error("未找到 OPENROUTER_API_KEY。请在 Streamlit 设置中添加此密钥。")
-        openrouter_api_key = ""
+    # 初始化日志
+    setup_logging()
     
-    try:
-        serper_api_key = st.secrets["SERPER_API_KEY"]
-    except (KeyError, FileNotFoundError):
-        st.error("未找到 SERPER_API_KEY。请在 Streamlit 设置中添加此密钥。")
-        serper_api_key = ""
+    # 初始化状态
+    if "generated_ps" not in st.session_state:
+        st.session_state.generated_ps = ""
     
-    try:
-        smithery_api_key = st.secrets["SMITHERY_API_KEY"]
-    except (KeyError, FileNotFoundError):
-        st.error("未找到 SMITHERY_API_KEY。请在 Streamlit 设置中添加此密钥。")
-        smithery_api_key = ""
+    # 设置页面标题
+    st.title("📝 PS助手平台")
     
-    try:
-        os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
-        os.environ["LANGCHAIN_PROJECT"] = "PS助手平台"
-    except (KeyError, FileNotFoundError):
-        st.error("未找到 LANGCHAIN_API_KEY。请在 Streamlit 设置中添加此密钥。")
+    # 显示MCP状态指示器
+    render_status_indicator()
     
-    add_custom_css()
-    st.markdown("<h1 class='page-title'>PS助手平台</h1>", unsafe_allow_html=True)
+    # 创建处理器实例
+    handler = BrainstormingHandler()
     
-    # 初始化PromptTemplates
-    if 'prompt_templates' not in st.session_state:
-        st.session_state.prompt_templates = PromptTemplates()
+    # 创建选项卡
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["院校研究", "PS分析", "留学信息", "PS生成", "素材库"])
     
-    # 检查API密钥是否已设置
-    if not openrouter_api_key:
-        st.warning("请设置 OPENROUTER_API_KEY 以启用完整功能。")
-        st.stop()
-    
-    # 显示MCP状态，但不作为警告，只是展示信息
-    if MCP_AVAILABLE:
-        st.success("✅ MCP已连接：高级结构化思考功能已启用。")
-    
-    tab1, tab2 = st.tabs(["PS助手", "提示词设置"])
-    
+    # 院校研究选项卡
     with tab1:
-        # 第一步：学校和专业研究
-        st.header("1️⃣ 学校和专业研究")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            school_name = st.text_input("学校名称", value=st.session_state.school_name)
-            if school_name != st.session_state.school_name:
-                st.session_state.school_name = school_name
-        
-        with col2:
-            program_name = st.text_input("专业名称", value=st.session_state.program_name)
-            if program_name != st.session_state.program_name:
-                st.session_state.program_name = program_name
-        
-        # 研究按钮
-        if st.button("开始学校和专业研究", key="start_research"):
-            if not school_name or not program_name:
-                st.error("请输入学校名称和专业名称")
-            else:
-                st.session_state.show_research = True
-                st.session_state.research_done = False
-                st.rerun()
-        
-        # 显示研究结果
-        if st.session_state.show_research:
-            with st.container():
-                st.subheader("院校信息汇总报告")
-                
-                if not st.session_state.research_done:
-                    try:
-                        school_research_agent = SchoolResearchAgent(
-                            api_key=openrouter_api_key,
-                            serper_api_key=serper_api_key,
-                            smithery_api_key=smithery_api_key,
-                            prompt_templates=st.session_state.prompt_templates
-                        )
-                        
-                        with st.spinner("正在研究学校和专业信息..."):
-                            result = school_research_agent.process_school_research(
-                                school_name=school_name,
-                                program_name=program_name
-                            )
-                            
-                            if result["status"] == "success":
-                                st.session_state.research_result = result["research_result"]
-                                st.session_state.research_done = True
-                                st.success("✅ 学校和专业研究完成！")
-                            else:
-                                st.error(f"研究过程中出错: {result['message']}")
-                    
-                    except Exception as e:
-                        st.error(f"处理过程中出错: {str(e)}")
-                else:
-                    st.markdown(st.session_state.research_result)
-                    st.success("✅ 学校和专业研究完成！")
-        
-        # 第二步：PS文件上传和支持文件分析
-        st.markdown("---")
-        st.header("2️⃣ PS文件上传和支持文件分析")
-        
-        # PS初稿上传
-        st.subheader("PS初稿上传")
-        ps_file = st.file_uploader("上传PS初稿文档", type=['docx'])
-        
-        # 自动检查PS文件状态
-        if ps_file:
-            try:
-                file_bytes = ps_file.read()
-                file_stream = io.BytesIO(file_bytes)
-                
-                md = MarkItDown()
-                raw_content = md.convert(file_stream)
-                
-                if raw_content:
-                    st.session_state.ps_draft = raw_content
-                    with st.expander("查看PS初稿内容", expanded=False):
-                        st.markdown(raw_content, unsafe_allow_html=True)
-                else:
-                    st.error("无法读取PS初稿文件，请检查格式是否正确。")
-            except Exception as e:
-                st.error(f"处理PS初稿文件时出错: {str(e)}")
-        else:
-            st.session_state.ps_draft = None
-        
-        # 支持文件上传
-        st.subheader("支持文件上传（可选）")
-        support_file = st.file_uploader("上传支持文件（成绩单、简历等）", type=['pdf', 'docx', 'jpg', 'jpeg', 'png'])
-        
-        # 如果有支持文件，分析
-        if support_file and st.session_state.school_name and st.session_state.program_name:
-            if st.button("分析支持文件", key="analyze_support"):
-                st.session_state.show_support_analysis = True
-                st.session_state.support_analysis_done = False
-                st.session_state.support_file = support_file
-                st.rerun()
-        
-        # 显示支持文件分析结果
-        if st.session_state.show_support_analysis:
-            with st.container():
-                st.subheader("支持文件分析报告")
-                
-                if not st.session_state.support_analysis_done:
-                    try:
-                        file = st.session_state.support_file
-                        file_bytes = file.read()
-                        file_name = file.name
-                        file_type = ""
-                        
-                        # 根据文件扩展名确定类型
-                        if file_name.endswith('.pdf'):
-                            file_type = "pdf"
-                        elif file_name.endswith('.docx'):
-                            file_type = "docx"
-                        elif file_name.endswith(('.jpg', '.jpeg', '.png')):
-                            file_type = "image"
-                        
-                        support_analyzer = SupportFileAnalyzer(
-                            api_key=openrouter_api_key,
-                            prompt_templates=st.session_state.prompt_templates
-                        )
-                        
-                        with st.spinner("正在分析支持文件..."):
-                            result = support_analyzer.analyze_file(
-                                file_bytes=file_bytes,
-                                file_name=file_name,
-                                file_type=file_type,
-                                school_name=st.session_state.school_name,
-                                program_name=st.session_state.program_name
-                            )
-                            
-                            if result["status"] == "success":
-                                st.session_state.support_analysis_result = result["support_analysis_result"]
-                                st.session_state.support_analysis_done = True
-                                st.success("✅ 支持文件分析完成！")
-                            else:
-                                st.error(f"支持文件分析出错: {result['message']}")
-                    
-                    except Exception as e:
-                        st.error(f"处理过程中出错: {str(e)}")
-                else:
-                    st.markdown(st.session_state.support_analysis_result)
-                    st.success("✅ 支持文件分析完成！")
-        
-        # 第三步：PS策略制定
-        if st.session_state.ps_draft:
-            st.markdown("---")
-            st.header("3️⃣ PS改写策略")
-            
-            if st.button("制定PS改写策略", key="create_strategy"):
-                if not st.session_state.school_name or not st.session_state.program_name:
-                    st.error("请先完成学校和专业研究")
-                else:
-                    st.session_state.show_ps_strategy = True
-                    st.session_state.ps_strategy_done = False
-                    st.rerun()
-            
-            # 显示PS策略
-            if st.session_state.show_ps_strategy:
-                with st.container():
-                    st.subheader("PS改写策略报告")
-                    
-                    if not st.session_state.ps_strategy_done:
-                        try:
-                            ps_strategy_agent = PSStrategyAgent(
-                                api_key=openrouter_api_key,
-                                prompt_templates=st.session_state.prompt_templates
-                            )
-                            
-                            # 获取支持文件分析结果（如果有）
-                            support_analysis = ""
-                            if st.session_state.support_analysis_done and st.session_state.support_analysis_result:
-                                support_analysis = st.session_state.support_analysis_result
-                            
-                            with st.spinner("正在制定PS改写策略..."):
-                                result = ps_strategy_agent.create_strategy(
-                                    ps_draft=st.session_state.ps_draft,
-                                    support_analysis=support_analysis,
-                                    school_name=st.session_state.school_name,
-                                    program_name=st.session_state.program_name
-                                )
-                                
-                                if result["status"] == "success":
-                                    st.session_state.ps_strategy_result = result["ps_strategy_result"]
-                                    st.session_state.ps_strategy_done = True
-                                    st.success("✅ PS改写策略制定完成！")
-                                else:
-                                    st.error(f"PS策略制定出错: {result['message']}")
-                        
-                        except Exception as e:
-                            st.error(f"处理过程中出错: {str(e)}")
-                    else:
-                        st.markdown(st.session_state.ps_strategy_result)
-                        st.success("✅ PS改写策略制定完成！")
-        
-        # 第四步：内容创作
-        if st.session_state.ps_strategy_done:
-            st.markdown("---")
-            st.header("4️⃣ 个人陈述创作")
-            
-            if st.button("开始创作", key="start_creation"):
-                st.session_state.show_content_creation = True
-                st.session_state.content_creation_done = False
-                st.rerun()
-            
-            # 显示创作结果
-            if st.session_state.show_content_creation:
-                with st.container():
-                    st.subheader("创作结果")
-                    
-                    if not st.session_state.content_creation_done:
-                        try:
-                            content_creation_agent = ContentCreationAgent(
-                                api_key=openrouter_api_key,
-                                prompt_templates=st.session_state.prompt_templates
-                            )
-                            
-                            # 获取支持文件分析结果（如果有）
-                            support_analysis = ""
-                            if st.session_state.support_analysis_done and st.session_state.support_analysis_result:
-                                support_analysis = st.session_state.support_analysis_result
-                            
-                            with st.spinner("正在创作个人陈述内容..."):
-                                result = content_creation_agent.create_content(
-                                    ps_strategy=st.session_state.ps_strategy_result,
-                                    ps_draft=st.session_state.ps_draft,
-                                    support_analysis=support_analysis,
-                                    school_name=st.session_state.school_name,
-                                    program_name=st.session_state.program_name
-                                )
-                                
-                                if result["status"] == "success":
-                                    st.session_state.content_creation_result = result["content_creation_result"]
-                                    st.session_state.content_creation_done = True
-                                    st.success("✅ 个人陈述创作完成！")
-                                else:
-                                    st.error(f"内容创作出错: {result['message']}")
-                        
-                        except Exception as e:
-                            st.error(f"处理过程中出错: {str(e)}")
-                    else:
-                        st.markdown(st.session_state.content_creation_result)
-                        st.success("✅ 个人陈述创作完成！")
-        
-        # 显示模型信息
-        st.markdown("---")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.markdown(f"<div class='model-info'>🤖 学校研究模型: <b>{st.session_state.school_research_model}</b></div>", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"<div class='model-info'>🤖 支持文件分析模型: <b>{st.session_state.support_analysis_model}</b></div>", unsafe_allow_html=True)
-        with col3:
-            st.markdown(f"<div class='model-info'>🤖 PS策略模型: <b>{st.session_state.ps_strategy_model}</b></div>", unsafe_allow_html=True)
-        with col4:
-            st.markdown(f"<div class='model-info'>🤖 内容创作模型: <b>{st.session_state.content_creation_model}</b></div>", unsafe_allow_html=True)
-    
-        # 显示MCP状态
-        st.markdown(f"<div class='model-info' style='background-color: {'#d1fae5' if MCP_AVAILABLE else '#fef2f2'};'>🔌 MCP状态: <b>{'已连接' if MCP_AVAILABLE else '未连接 (使用备用实现)'}</b></div>", unsafe_allow_html=True)
-    
-    with tab2:
-        st.title("提示词和模型设置")
-        
-        # 模型选择部分
-        st.header("模型选择")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("学校研究模型")
-            school_research_model = st.selectbox(
-                "选择学校研究模型",
-                ["google/gemini-2.0-flash-001", "google/gemini-2.0-flash-lite-001", "google/gemini-2.5-flash-preview", "google/gemini-2.5-flash-preview:thinking"],
-                index=["google/gemini-2.0-flash-001", "google/gemini-2.0-flash-lite-001", "google/gemini-2.5-flash-preview", "google/gemini-2.5-flash-preview:thinking"].index(st.session_state.school_research_model)
-            )
-            if school_research_model != st.session_state.school_research_model:
-                st.session_state.school_research_model = school_research_model
-                st.success(f"已切换学校研究模型为: {school_research_model}")
-            
-            st.subheader("PS策略模型")
-            ps_strategy_model = st.selectbox(
-                "选择PS策略模型",
-                ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-chat-v3-0324:free", "anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-haiku"],
-                index=["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-chat-v3-0324:free", "anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-haiku"].index(st.session_state.ps_strategy_model)
-            )
-            if ps_strategy_model != st.session_state.ps_strategy_model:
-                st.session_state.ps_strategy_model = ps_strategy_model
-                st.success(f"已切换PS策略模型为: {ps_strategy_model}")
-        
-        with col2:
-            st.subheader("支持文件分析模型")
-            support_analysis_model = st.selectbox(
-                "选择支持文件分析模型",
-                ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-chat-v3-0324:free", "anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-haiku"],
-                index=["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-chat-v3-0324:free", "anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-haiku"].index(st.session_state.support_analysis_model)
-            )
-            if support_analysis_model != st.session_state.support_analysis_model:
-                st.session_state.support_analysis_model = support_analysis_model
-                st.success(f"已切换支持文件分析模型为: {support_analysis_model}")
-            
-            st.subheader("内容创作模型")
-            content_creation_model = st.selectbox(
-                "选择内容创作模型",
-                ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-chat-v3-0324:free", "anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-haiku"],
-                index=["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-chat-v3-0324:free", "anthropic/claude-3.7-sonnet", "anthropic/claude-3.5-haiku"].index(st.session_state.content_creation_model)
-            )
-            if content_creation_model != st.session_state.content_creation_model:
-                st.session_state.content_creation_model = content_creation_model
-                st.success(f"已切换内容创作模型为: {content_creation_model}")
-        
-        # 提示词设置
-        st.markdown("---")
-        st.header("提示词设置")
-        
-        prompt_templates = st.session_state.prompt_templates
-        
-        tab_school, tab_support, tab_strategy, tab_content = st.tabs(["学校研究", "支持文件分析", "PS策略", "内容创作"])
-        
-        with tab_school:
-            st.subheader("学校研究")
-            school_research_role = st.text_area(
-                "角色设定",
-                value=prompt_templates.get_template('school_research_role'),
-                height=200,
-                key="school_research_role"
-            )
-            school_research_task = st.text_area(
-                "任务说明",
-                value=prompt_templates.get_template('school_research_task'),
-                height=200,
-                key="school_research_task"
-            )
-            school_research_output = st.text_area(
-                "输出格式",
-                value=prompt_templates.get_template('school_research_output'),
-                height=200,
-                key="school_research_output"
-            )
-        
-        with tab_support:
-            st.subheader("支持文件分析")
-            support_analysis_role = st.text_area(
-                "角色设定",
-                value=prompt_templates.get_template('support_analysis_role'),
-                height=200,
-                key="support_analysis_role"
-            )
-            support_analysis_task = st.text_area(
-                "任务说明",
-                value=prompt_templates.get_template('support_analysis_task'),
-                height=200,
-                key="support_analysis_task"
-            )
-            support_analysis_output = st.text_area(
-                "输出格式",
-                value=prompt_templates.get_template('support_analysis_output'),
-                height=200,
-                key="support_analysis_output"
-            )
-        
-        with tab_strategy:
-            st.subheader("PS策略")
-            ps_strategy_role = st.text_area(
-                "角色设定",
-                value=prompt_templates.get_template('ps_strategy_role'),
-                height=200,
-                key="ps_strategy_role"
-            )
-            ps_strategy_task = st.text_area(
-                "任务说明",
-                value=prompt_templates.get_template('ps_strategy_task'),
-                height=200,
-                key="ps_strategy_task"
-            )
-            ps_strategy_output = st.text_area(
-                "输出格式",
-                value=prompt_templates.get_template('ps_strategy_output'),
-                height=200,
-                key="ps_strategy_output"
-            )
-        
-        with tab_content:
-            st.subheader("内容创作")
-            content_creation_role = st.text_area(
-                "角色设定",
-                value=prompt_templates.get_template('content_creation_role'),
-                height=200,
-                key="content_creation_role"
-            )
-            content_creation_task = st.text_area(
-                "任务说明",
-                value=prompt_templates.get_template('content_creation_task'),
-                height=200,
-                key="content_creation_task"
-            )
-            content_creation_output = st.text_area(
-                "输出格式",
-                value=prompt_templates.get_template('content_creation_output'),
-                height=200,
-                key="content_creation_output"
-            )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("更新提示词", key="update_prompts"):
-                # 更新学校研究提示词
-                prompt_templates.update_template('school_research_role', school_research_role)
-                prompt_templates.update_template('school_research_task', school_research_task)
-                prompt_templates.update_template('school_research_output', school_research_output)
-                
-                # 更新支持文件分析提示词
-                prompt_templates.update_template('support_analysis_role', support_analysis_role)
-                prompt_templates.update_template('support_analysis_task', support_analysis_task)
-                prompt_templates.update_template('support_analysis_output', support_analysis_output)
-                
-                # 更新PS策略提示词
-                prompt_templates.update_template('ps_strategy_role', ps_strategy_role)
-                prompt_templates.update_template('ps_strategy_task', ps_strategy_task)
-                prompt_templates.update_template('ps_strategy_output', ps_strategy_output)
-                
-                # 更新内容创作提示词
-                prompt_templates.update_template('content_creation_role', content_creation_role)
-                prompt_templates.update_template('content_creation_task', content_creation_task)
-                prompt_templates.update_template('content_creation_output', content_creation_output)
-                
-                st.success("✅ 提示词已更新！")
-        
-        with col2:
-            if st.button("重置为默认提示词", key="reset_prompts"):
-                prompt_templates.reset_to_default()
-                st.rerun()
+        handle_school_research(handler)
 
 class SchoolResearchAgent:
     def __init__(self, api_key: str, serper_api_key: str, smithery_api_key: str, prompt_templates: PromptTemplates):
@@ -1995,37 +1526,50 @@ class SchoolResearchAgent:
         
         # 创建服务器URL
         url = f"https://server.smithery.ai/@marcopesani/mcp-server-sequential-thinking/mcp?config={config_b64}&api_key={self.smithery_api_key}"
-        logger.info(f"连接到Smithery服务器: {url}")
+        logger.info(f"连接到Smithery服务器: {url[:70]}...")
         
         result = ""
         try:
-            # 连接到服务器使用HTTP客户端
-            logger.info("尝试建立websocket连接...")
-            async with websocket_client(url) as (read_stream, write_stream, _):
-                logger.info("websocket连接成功，创建MCP客户端会话...")
-                async with mcp.ClientSession(read_stream, write_stream) as session:
-                    # 初始化连接
-                    logger.info("初始化MCP会话...")
-                    await session.initialize()
-                    logger.info("MCP会话初始化成功")
-                    
-                    # 执行思考任务
-                    logger.info("执行sequential-thinking工具...")
-                    thinking_result = await session.run_tool(
-                        "sequential-thinking",
-                        {
-                            "task": task
-                        }
-                    )
-                    logger.info("sequential-thinking执行完成")
-                    result = thinking_result
-                    
-                    if callback_handler:
-                        # 将结果发送到回调处理器以流式显示
-                        for token in str(result).split():  # 简单拆分为词作为token
-                            callback_handler.on_llm_new_token(token + " ", **{})
+            # 使用mcp.create_client连接
+            logger.info("创建MCP客户端...")
+            client_session = await mcp.create_client(url)
+            logger.info("MCP客户端创建成功")
+            
+            try:
+                # 列出可用工具
+                logger.info("获取可用工具...")
+                tools = await client_session.list_tools()
+                logger.info(f"可用工具: {', '.join([t.name for t in tools.tools])}")
+                
+                # 执行思考任务
+                logger.info("执行sequential-thinking工具...")
+                thinking_result = await client_session.run_tool(
+                    "sequential-thinking",
+                    {
+                        "task": task
+                    }
+                )
+                logger.info("sequential-thinking执行完成")
+                result = thinking_result
+                
+                if callback_handler:
+                    # 将结果发送到回调处理器以流式显示
+                    for token in str(result).split():  # 简单拆分为词作为token
+                        callback_handler.on_llm_new_token(token + " ", **{})
+                
+                # 关闭会话
+                await client_session.close()
+            except Exception as api_error:
+                logger.error(f"MCP API调用失败: {str(api_error)}")
+                try:
+                    await client_session.close()
+                except:
+                    pass
+                raise api_error
         except Exception as e:
             logger.error(f"MCP服务调用失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             if callback_handler:
                 callback_handler.on_llm_new_token(f"MCP服务调用失败: {str(e)}\n使用备用方法...\n", **{})
             
@@ -2651,6 +2195,40 @@ class ContentCreationAgent:
                 "status": "error",
                 "message": str(e)
             }
+
+def render_status_indicator():
+    """渲染MCP连接状态指示器"""
+    st.sidebar.divider()
+    
+    # 展示MCP连接状态
+    if MCP_AVAILABLE:
+        st.sidebar.markdown("🟢 **MCP状态: 已连接** (使用官方实现)")
+    else:
+        try:
+            # 测试MCP导入
+            import mcp
+            version = getattr(mcp, "__version__", "未知")
+            # 添加详细的错误信息
+            if hasattr(st.session_state, 'mcp_error'):
+                error_msg = st.session_state.mcp_error
+                st.sidebar.markdown(f"🔌 **MCP状态: 未连接** (使用备用实现)")
+                with st.sidebar.expander("查看连接错误详情"):
+                    st.error(f"MCP版本: {version}\n错误: {error_msg}")
+            else:
+                if "SMITHERY_API_KEY" not in st.secrets:
+                    st.sidebar.markdown(f"🔌 **MCP状态: 未连接** (使用备用实现)")
+                    with st.sidebar.expander("查看连接错误详情"):
+                        st.error("未配置Smithery API密钥")
+                else:
+                    st.sidebar.markdown(f"🔌 **MCP状态: 未连接** (使用备用实现)")
+                    with st.sidebar.expander("查看连接错误详情"):
+                        st.error("无法连接到Smithery服务器，请检查网络连接或API密钥")
+        except ImportError:
+            st.sidebar.markdown("🔌 **MCP状态: 未连接** (使用备用实现)")
+            with st.sidebar.expander("查看连接错误详情"):
+                st.error("未安装MCP模块")
+    
+    st.sidebar.divider()
 
 if __name__ == "__main__":
     main()
