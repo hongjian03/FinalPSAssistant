@@ -25,7 +25,6 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.callbacks.streamlit import StreamlitCallbackHandler
 from langchain.chains import SequentialChain, LLMChain
 from typing import Dict, Any, List
 import io
@@ -48,66 +47,24 @@ from langchain.callbacks.base import BaseCallbackHandler
 from markitdown import MarkItDown
 from docx import Document
 
-# 尝试导入 mcp 模块，如果不可用则使用我们的替代实现
+# 导入 MCP 模块
 try:
     import mcp
     from mcp.client.streamable_http import streamablehttp_client
-    MCP_AVAILABLE = True
     logger.info("MCP 模块已成功导入")
+    MCP_AVAILABLE = True
 except ImportError:
-    logger.warning("MCP 模块导入失败，将使用替代实现")
-    
-    # 首先尝试导入我们的 mcp_fallback 模块
+    logger.error("MCP 模块导入失败，请安装 MCP: pip install mcp")
+    st.error("缺少 MCP 模块，某些功能可能不可用。请运行 pip install mcp 安装所需依赖。")
+    MCP_AVAILABLE = False
+
+# 导入替代实现
+if not MCP_AVAILABLE:
     try:
-        from mcp_fallback import ClientSession as mcp_ClientSession
-        from mcp_fallback import streamablehttp_client
-        from mcp_fallback import run_sequential_thinking
-        
-        # 然后尝试导入我们的 smithery_fallback 模块（mcp_fallback会尝试使用它）
-        try:
-            import smithery_fallback
-            logger.info("Smithery 替代实现已成功导入")
-        except ImportError:
-            logger.warning("Smithery 替代实现导入失败，将使用基本替代实现")
-        
-        # 创建一个模拟的 mcp 模块
-        class MCPModule:
-            def __init__(self):
-                self.ClientSession = mcp_ClientSession
-        
-        mcp = MCPModule()
-        MCP_AVAILABLE = False
-        logger.info("已加载 MCP 替代实现")
+        from smithery_fallback import run_sequential_thinking
+        logger.info("已加载 Smithery 替代实现")
     except ImportError:
-        logger.error("无法加载 MCP 替代实现，某些功能可能不可用")
-        
-        # 创建最基本的占位符
-        def streamablehttp_client(url):
-            async def dummy():
-                return None, None, None
-            return dummy()
-            
-        class DummyClientSession:
-            def __init__(self, *args, **kwargs):
-                pass
-                
-            async def initialize(self):
-                return True
-                
-            async def run_tool(self, *args, **kwargs):
-                return "MCP功能不可用"
-        
-        class DummyMCPModule:
-            def __init__(self):
-                self.ClientSession = DummyClientSession
-        
-        mcp = DummyMCPModule()
-        MCP_AVAILABLE = False
-        
-        async def run_sequential_thinking(task, api_key, callback=None):
-            if callback:
-                callback("MCP功能不可用，无法执行结构化思考。")
-            return "MCP功能不可用，无法执行结构化思考。"
+        logger.warning("无法导入 Smithery 替代实现，某些功能可能不可用")
 
 # 应用 nest_asyncio 避免在Streamlit中运行asyncio时的问题
 nest_asyncio.apply()
@@ -1807,13 +1764,40 @@ class SchoolResearchAgent:
         # 检查MCP是否可用
         if not MCP_AVAILABLE:
             logger.warning("MCP不可用，使用替代实现")
-            # 使用替代实现
-            result = await run_sequential_thinking(
-                task, 
-                self.smithery_api_key, 
-                callback=lambda token: callback_handler.on_llm_new_token(token, **{}) if callback_handler else None
-            )
-            return result
+            try:
+                # 使用替代实现
+                from mcp_fallback import run_sequential_thinking
+                result = await run_sequential_thinking(
+                    task, 
+                    self.smithery_api_key, 
+                    callback=lambda token: callback_handler.on_llm_new_token(token, **{}) if callback_handler else None
+                )
+                return result
+            except Exception as e:
+                logger.error(f"替代实现错误: {str(e)}")
+                if callback_handler:
+                    callback_handler.on_llm_new_token(f"替代实现错误: {str(e)}\n使用直接LLM调用...\n", **{})
+                
+                # 使用 LLM 直接处理任务
+                messages = [
+                    SystemMessage(content="你是一个专业的院校研究助手，擅长分析各国大学的专业项目信息。"),
+                    HumanMessage(content=task)
+                ]
+                
+                chat = ChatOpenAI(
+                    temperature=0.1,
+                    model="anthropic/claude-3-haiku-20240307",
+                    api_key=self.openrouter_api_key,
+                    base_url="https://openrouter.ai/api/v1",
+                    streaming=True
+                )
+                
+                response = chat.invoke(
+                    messages,
+                    callbacks=[callback_handler] if callback_handler else None
+                )
+                
+                return response.content
         
         # 配置信息
         config = {
@@ -1851,26 +1835,39 @@ class SchoolResearchAgent:
             if callback_handler:
                 callback_handler.on_llm_new_token(f"MCP服务调用失败: {str(e)}\n使用备用方法...\n", **{})
             
-            # 使用 LLM 直接处理任务
-            messages = [
-                SystemMessage(content="你是一个专业的院校研究助手，擅长分析各国大学的专业项目信息。"),
-                HumanMessage(content=task)
-            ]
-            
-            chat = ChatOpenAI(
-                temperature=0.1,
-                model="anthropic/claude-3-haiku-20240307",
-                api_key=self.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                streaming=True
-            )
-            
-            response = chat.invoke(
-                messages,
-                callbacks=[callback_handler] if callback_handler else None
-            )
-            
-            result = response.content
+            try:
+                # 使用替代实现
+                from mcp_fallback import run_sequential_thinking
+                result = await run_sequential_thinking(
+                    task, 
+                    self.smithery_api_key, 
+                    callback=lambda token: callback_handler.on_llm_new_token(token, **{}) if callback_handler else None
+                )
+            except Exception as fallback_error:
+                logger.error(f"替代实现错误: {str(fallback_error)}")
+                if callback_handler:
+                    callback_handler.on_llm_new_token(f"替代实现错误: {str(fallback_error)}\n使用直接LLM调用...\n", **{})
+                
+                # 使用 LLM 直接处理任务
+                messages = [
+                    SystemMessage(content="你是一个专业的院校研究助手，擅长分析各国大学的专业项目信息。"),
+                    HumanMessage(content=task)
+                ]
+                
+                chat = ChatOpenAI(
+                    temperature=0.1,
+                    model="anthropic/claude-3-haiku-20240307",
+                    api_key=self.openrouter_api_key,
+                    base_url="https://openrouter.ai/api/v1",
+                    streaming=True
+                )
+                
+                response = chat.invoke(
+                    messages,
+                    callbacks=[callback_handler] if callback_handler else None
+                )
+                
+                result = response.content
                 
         return result
     
