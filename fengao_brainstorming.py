@@ -1419,9 +1419,6 @@ def initialize_session_state():
 
 def main():
     """主应用程序入口点"""
-    # 初始化日志
-    setup_logging()
-    
     # 初始化状态
     if "generated_ps" not in st.session_state:
         st.session_state.generated_ps = ""
@@ -1432,15 +1429,16 @@ def main():
     # 显示MCP状态指示器
     render_status_indicator()
     
-    # 创建处理器实例
-    handler = BrainstormingHandler()
+    # 简单显示一些文本
+    st.write("应用程序已成功启动！")
+    st.info("MCP连接测试：使用测试脚本 `python test_mcp_setup.py` 可以诊断MCP连接问题")
     
-    # 创建选项卡
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["院校研究", "PS分析", "留学信息", "PS生成", "素材库"])
+    # 显示一个占位符
+    st.write("请使用侧边栏配置应用程序选项")
     
-    # 院校研究选项卡
-    with tab1:
-        handle_school_research(handler)
+    # 可选：添加侧边栏内容
+    st.sidebar.title("配置选项")
+    st.sidebar.write("应用程序配置选项将显示在这里")
 
 class SchoolResearchAgent:
     def __init__(self, api_key: str, serper_api_key: str, smithery_api_key: str, prompt_templates: PromptTemplates):
