@@ -47,8 +47,7 @@ class PSInfoCollector:
             # 确保Serper客户端初始化
             initialized = await self.serper_client.initialize()
             if not initialized:
-                st.error("无法初始化Serper客户端进行网络搜索。")
-                return self._get_mock_report(university, major)
+                return "**错误：无法初始化Serper客户端进行网络搜索。请检查SERPER_API_KEY和SMITHERY_API_KEY是否正确设置。**"
             
             # 构建搜索查询
             search_query = f"{university} {major} postgraduate program requirements application"
@@ -56,16 +55,31 @@ class PSInfoCollector:
             # 执行Web搜索
             with st.status("正在搜索网络获取最新院校信息..."):
                 search_results = await self.serper_client.search_web(search_query)
+                
+                # 检查搜索结果是否包含错误
+                if "error" in search_results:
+                    return f"**错误：执行Web搜索时出错 - {search_results['error']}**"
+                
+                # 检查搜索结果是否有效
+                if not search_results or "organic" not in search_results or not search_results["organic"]:
+                    return f"**错误：未找到关于{university}的{major}专业的搜索结果。请检查拼写或尝试其他关键词。**"
             
             # 根据搜索结果生成提示
             prompt = self._build_info_prompt(university, major, search_results, custom_requirements)
             
             # 调用OpenRouter API生成报告
-            return self._call_openrouter_api(prompt, university, major)
+            report = self._call_openrouter_api(prompt, university, major)
+            
+            # 检查报告是否生成成功
+            if report.startswith("**错误："):
+                return report
+                
+            return report
         
         except Exception as e:
-            st.error(f"收集院校信息时出错: {str(e)}")
-            return self._get_mock_report(university, major)
+            error_msg = f"**错误：收集院校信息时出错 - {str(e)}**"
+            st.error(error_msg)
+            return error_msg
     
     def _build_info_prompt(self, university: str, major: str, search_results: Dict[str, Any], custom_requirements: str) -> str:
         """构建带有搜索结果的提示"""
@@ -162,56 +176,13 @@ class PSInfoCollector:
                     content = result["choices"][0]["message"]["content"]
                     return content
                 else:
-                    st.error(f"OpenRouter API 错误 ({self.model_name}): {response.status_code} - {response.text}")
-                    return self._get_mock_report(university, major)
+                    error_msg = f"**错误：OpenRouter API 调用失败 ({self.model_name}): {response.status_code} - {response.text}**"
+                    st.error(error_msg)
+                    return error_msg
             except Exception as e:
-                st.error(f"OpenRouter API 调用错误: {str(e)}")
-                return self._get_mock_report(university, major)
-    
-    def _get_mock_report(self, university: str, major: str) -> str:
-        """
-        获取模拟报告作为后备选项。
-        
-        Returns:
-            模拟的院校信息收集报告
-        """
-        # 使用提供的数据填充，或使用默认值
-        university = university or "剑桥大学"
-        major = major or "计算机科学"
-        
-        mock_report = f"""
-        # {university} {major}专业信息收集报告
-        
-        ## 项目概览
-        {university}的{major}硕士项目是一个为期12个月的全日制课程，旨在为学生提供计算机科学领域的先进知识和研究技能。该项目在QS世界大学排名中位列计算机科学专业前10，以其卓越的教学质量和研究水平著称。
-        
-        ## 申请要求
-        - **学历背景**：计算机科学或相关学科的本科学位，成绩优良（英国一等或二等一学位，GPA 3.5/4.0或以上）
-        - **语言要求**：雅思总分至少6.5分，单项不低于6.0；或托福iBT总分至少92分，单项不低于22分
-        - **其他要求**：需提供两封学术推荐信，个人陈述需突出研究兴趣和职业目标
-        
-        ## 申请流程
-        - **申请开放日期**：每年10月初
-        - **申请截止日期**：国际学生建议在1月15日前申请，最终截止日期为6月30日
-        - **所需材料**：在线申请表、成绩单、学位证书、语言成绩证明、个人陈述、推荐信
-        - **申请费用**：75英镑
-        
-        ## 课程设置
-        - **核心课程**：高级算法、机器学习、计算机视觉、人工智能、网络安全
-        - **选修方向**：数据科学、人工智能、软件工程、网络安全
-        - **研究机会**：学生需完成一个独立研究项目，并提交硕士论文
-        - **实习机会**：与行业合作伙伴提供实习机会，包括谷歌、微软等知名企业
-        
-        ## 相关资源
-        - **项目官网**：https://www.{university.lower()}.ac.uk/study/{major.lower().replace(' ', '-')}/postgraduate
-        - **招生办邮箱**：admissions@{university.lower()}.ac.uk
-        - **国际学生服务**：international-students@{university.lower()}.ac.uk
-        
-        ## 信息来源
-        本报告信息来源于{university}官方网站以及相关教育门户网站，由于网站信息可能会更新，申请者应以官方网站最新信息为准。
-        """
-        
-        return mock_report
+                error_msg = f"**错误：OpenRouter API 调用时发生异常: {str(e)}**"
+                st.error(error_msg)
+                return error_msg
     
     def run_async(self, coroutine):
         """帮助方法，用于同步运行异步方法"""
