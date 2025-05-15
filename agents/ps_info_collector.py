@@ -308,6 +308,17 @@ class PSInfoCollector:
                 search_content += f"信息源 {i}: {title}\n"
                 search_content += f"链接: {link}\n"
                 search_content += f"摘要: {snippet}\n\n"
+                
+                # 添加抓取的页面内容（如果有）
+                if "page_content" in result and result["page_content"]:
+                    page_content = result["page_content"]
+                    # 限制内容长度，避免提示词过长
+                    max_content_length = 10000
+                    if len(page_content) > max_content_length:
+                        page_content = page_content[:max_content_length] + "...[内容过长已截断]"
+                    
+                    search_content += f"网页详细内容:\n{page_content}\n\n"
+                    search_content += "---\n\n"
         # 兼容其他可能的结果格式
         elif "results" in search_results and search_results["results"]:
             # 适配一些搜索API返回的不同结构
@@ -324,6 +335,17 @@ class PSInfoCollector:
                 search_content += f"信息源 {i}: {title}\n"
                 search_content += f"链接: {link}\n"
                 search_content += f"摘要: {snippet}\n\n"
+                
+                # 添加抓取的页面内容（如果有）
+                if "page_content" in result and result["page_content"]:
+                    page_content = result["page_content"]
+                    # 限制内容长度，避免提示词过长
+                    max_content_length = 10000
+                    if len(page_content) > max_content_length:
+                        page_content = page_content[:max_content_length] + "...[内容过长已截断]"
+                    
+                    search_content += f"网页详细内容:\n{page_content}\n\n"
+                    search_content += "---\n\n"
         # 如果没有结构化的搜索结果，但有原始文本响应
         elif isinstance(search_results, str) and len(search_results) > 0:
             search_content += "以下是从Web搜索获取的相关信息：\n\n"
@@ -370,7 +392,7 @@ class PSInfoCollector:
         
         {custom_req_text}
         
-        # 搜索结果
+        # 搜索结果和网页内容
         
         {search_content}
         
@@ -379,11 +401,12 @@ class PSInfoCollector:
         {output_format.replace("[大学名称]", university).replace("[专业名称]", major)}
         
         重要提示：
-        1. 优先使用搜索结果中的信息，并引用信息来源
-        2. 如果搜索结果中缺少某些信息，可以使用你的知识进行补充，但请明确指出这部分是估计信息
+        1. 优先使用搜索结果中的信息，特别是网页详细内容中的信息，这些包含了完整的网页内容
+        2. 如果搜索结果中缺少某些信息，一定要使用你的知识进行合理补充，明确标注为"根据模型知识估计"
         3. 保持客观专业的语气，专注于事实性信息
         4. 如有冲突信息，请分析优先采用最可靠的来源（如官方网站信息）
-        5. 不要编造不存在的信息，如不确定，请明确说明
+        5. 不要留下"待补充"或空白部分，一定要提供内容，即使是基于你的估计
+        6. 根据网页详细内容提取和整理有关课程设置、项目特色、申请截止日期等信息
         """
         
         return prompt
