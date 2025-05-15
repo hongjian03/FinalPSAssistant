@@ -73,73 +73,81 @@ class SerperClient:
             return False
             
         try:
-            # 创建一个进度条
-            progress_text = "正在连接到Serper MCP服务..."
-            my_bar = st.progress(0, text=progress_text)
-            
-            # 显示初始化信息
-            st.info("开始初始化Serper MCP服务连接")
-            
-            # 显示完整URL信息（不包括配置和API密钥）
-            base_url = self.url.split("?")[0]
-            st.info(f"连接到服务器: {base_url}")
-            
-            # 更新进度条
-            my_bar.progress(10, text="正在准备HTTP流式连接...")
-            await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
-            
-            try:
-                # 设置更长的超时时间
-                my_bar.progress(20, text="开始建立连接 (30秒超时)...")
-                await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
+            # 创建一个专门的容器用于显示连接进度
+            connection_container = st.container()
+            with connection_container:
+                st.subheader("MCP连接进度")
                 
-                async with asyncio.timeout(30):  # 增加超时时间到30秒
-                    # Connect to the server using streamable HTTP client
-                    my_bar.progress(30, text="开始HTTP流式连接...")
-                    await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
+                # 创建进度条和状态显示
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                status_text.info("开始初始化Serper MCP服务连接")
+                
+                # 显示基本URL信息（不包括配置和API密钥）
+                base_url = self.url.split("?")[0]
+                st.caption(f"连接到服务器: {base_url}")
+                
+                try:
+                    # 设置较长的超时时间
+                    status_text.info("准备建立连接 (30秒超时)...")
+                    progress_bar.progress(10)
+                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
                     
-                    # 尝试创建MCP会话
-                    try:
-                        async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
-                            my_bar.progress(50, text="HTTP流式连接成功，创建MCP会话...")
-                            await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
+                    async with asyncio.timeout(30):  # 增加超时时间到30秒
+                        # Connect to the server using streamable HTTP client
+                        status_text.info("开始HTTP流式连接...")
+                        progress_bar.progress(30)
+                        await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                        
+                        # 尝试创建MCP会话
+                        try:
+                            async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
+                                status_text.info("HTTP流式连接成功，创建MCP会话...")
+                                progress_bar.progress(50)
+                                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                
+                                async with mcp.ClientSession(read_stream, write_stream) as session:
+                                    # Initialize the connection
+                                    status_text.info("初始化MCP会话...")
+                                    progress_bar.progress(70)
+                                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                    
+                                    # 初始化连接
+                                    await session.initialize()
+                                    
+                                    # List available tools
+                                    status_text.info("获取可用工具列表...")
+                                    progress_bar.progress(85)
+                                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                    
+                                    tools_result = await session.list_tools()
+                                    self.available_tools = [t.name for t in tools_result.tools]
+                                    
+                                    # 连接成功，完成进度条
+                                    progress_bar.progress(100)
+                                    status_text.success("MCP连接成功！")
+                                    st.success(f"成功连接到Serper MCP API。可用工具: {', '.join(self.available_tools)}")
+                                    return True
+                        except Exception as e:
+                            error_type = type(e).__name__
+                            progress_bar.progress(100)
+                            status_text.error(f"MCP连接失败: {error_type}")
                             
-                            async with mcp.ClientSession(read_stream, write_stream) as session:
-                                # Initialize the connection
-                                my_bar.progress(70, text="初始化MCP会话...")
-                                await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
-                                
-                                # 初始化连接
-                                await session.initialize()
-                                
-                                # List available tools
-                                my_bar.progress(85, text="获取可用工具列表...")
-                                await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
-                                
-                                tools_result = await session.list_tools()
-                                self.available_tools = [t.name for t in tools_result.tools]
-                                
-                                # 连接成功，完成进度条
-                                my_bar.progress(100, text="MCP连接成功！")
-                                st.success(f"成功连接到Serper MCP API。可用工具: {', '.join(self.available_tools)}")
-                                return True
-                    except Exception as e:
-                        error_type = type(e).__name__
-                        my_bar.progress(100, text=f"MCP连接失败: {error_type}")
-                        st.error(f"MCP连接异常: {error_type}: {str(e)}")
-                        st.error(f"无法建立MCP连接: {error_type}: {str(e)}")
-                        
-                        # 提供具体错误信息
-                        if "401" in str(e) or "unauthorized" in str(e).lower():
-                            st.error("401未授权错误 - API密钥验证失败。请检查SMITHERY_API_KEY是否正确。")
-                        elif "404" in str(e) or "not found" in str(e).lower():
-                            st.error("404未找到错误 - 无法找到MCP服务器端点。请检查URL是否正确。")
-                        
-                        return False
-            except asyncio.TimeoutError:
-                my_bar.progress(100, text="连接超时(30秒)")
-                st.error("连接超时(30秒)。Serper MCP API服务器响应时间过长或不响应。")
-                return False
+                            st.error(f"MCP连接异常: {error_type}: {str(e)}")
+                            
+                            # 提供具体错误信息
+                            if "401" in str(e) or "unauthorized" in str(e).lower():
+                                st.error("401未授权错误 - API密钥验证失败。请检查SMITHERY_API_KEY是否正确。")
+                            elif "404" in str(e) or "not found" in str(e).lower():
+                                st.error("404未找到错误 - 无法找到MCP服务器端点。请检查URL是否正确。")
+                            
+                            return False
+                except asyncio.TimeoutError:
+                    progress_bar.progress(100)
+                    status_text.error("连接超时(30秒)")
+                    
+                    st.error("连接超时(30秒)。Serper MCP API服务器响应时间过长或不响应。")
+                    return False
         except Exception as e:
             error_message = str(e)
             traceback_str = traceback.format_exc()
@@ -166,70 +174,80 @@ class SerperClient:
             Dictionary containing search results
         """
         try:
-            # 创建进度条
-            progress_text = f"正在搜索: {query}"
-            my_bar = st.progress(0, text=progress_text)
-            
-            # 防止查询为空
-            if not query or len(query.strip()) == 0:
-                my_bar.progress(100, text="搜索查询不能为空")
-                st.error("搜索查询不能为空")
-                return {"error": "搜索查询不能为空"}
-            
-            # Connect to the server using streamable HTTP client
-            my_bar.progress(20, text="建立MCP连接...")
-            await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
-            
-            try:
-                async with asyncio.timeout(30):  # 增加超时时间到30秒
-                    async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
-                        my_bar.progress(40, text="创建MCP会话...")
-                        await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
-                        
-                        async with mcp.ClientSession(read_stream, write_stream) as session:
-                            # Initialize the connection
-                            my_bar.progress(50, text="初始化会话...")
-                            await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
+            # 创建专用容器显示搜索进度
+            search_container = st.container()
+            with search_container:
+                st.subheader(f"执行搜索: {query}")
+                
+                # 创建进度条和状态显示
+                search_progress = st.progress(0)
+                search_status = st.empty()
+                search_status.info("准备搜索...")
+                
+                # 防止查询为空
+                if not query or len(query.strip()) == 0:
+                    search_progress.progress(100)
+                    search_status.error("搜索查询不能为空")
+                    return {"error": "搜索查询不能为空"}
+                
+                # Connect to the server using streamable HTTP client
+                search_progress.progress(20)
+                search_status.info("建立MCP连接...")
+                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                
+                try:
+                    async with asyncio.timeout(30):  # 增加超时时间到30秒
+                        async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
+                            search_progress.progress(40)
+                            search_status.info("创建MCP会话...")
+                            await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
                             
-                            await session.initialize()
-                            
-                            # Call the web search tool
-                            my_bar.progress(70, text=f"执行搜索: {query}")
-                            await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
-                            
-                            try:
-                                result = await session.call_tool("web-search", arguments={
-                                    "query": query,
-                                    "numResults": 5
-                                })
+                            async with mcp.ClientSession(read_stream, write_stream) as session:
+                                # Initialize the connection
+                                search_progress.progress(50)
+                                search_status.info("初始化会话...")
+                                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
                                 
-                                my_bar.progress(90, text="处理搜索结果...")
-                                await asyncio.sleep(0.5)  # 短暂延迟以便进度条更新
+                                await session.initialize()
                                 
-                                if hasattr(result, 'result'):
-                                    if "organic" in result.result and result.result["organic"]:
-                                        my_bar.progress(100, text=f"搜索成功，找到 {len(result.result['organic'])} 条结果")
-                                        st.success(f"搜索成功，找到 {len(result.result['organic'])} 条结果")
+                                # Call the web search tool
+                                search_progress.progress(70)
+                                search_status.info(f"执行搜索: {query}")
+                                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                
+                                try:
+                                    result = await session.call_tool("web-search", arguments={
+                                        "query": query,
+                                        "numResults": 5
+                                    })
+                                    
+                                    search_progress.progress(90)
+                                    search_status.info("处理搜索结果...")
+                                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                    
+                                    if hasattr(result, 'result'):
+                                        search_progress.progress(100)
+                                        if "organic" in result.result and result.result["organic"]:
+                                            search_status.success(f"搜索成功，找到 {len(result.result['organic'])} 条结果")
+                                        else:
+                                            search_status.warning("搜索完成，但未找到有机结果")
+                                        return result.result
                                     else:
-                                        my_bar.progress(100, text="搜索完成，但未找到有机结果")
-                                        st.warning("搜索完成，但未找到有机结果")
-                                    return result.result
-                                else:
-                                    my_bar.progress(100, text="搜索结果格式不正确")
-                                    st.error("搜索结果格式不正确")
-                                    return {"error": "搜索结果格式不正确，缺少result属性"}
-                            except Exception as e:
-                                my_bar.progress(100, text=f"调用web-search工具时出错: {str(e)}")
-                                st.error(f"调用web-search工具时出错: {str(e)}")
-                                return {"error": f"调用web-search工具时出错: {str(e)}"}
-            except asyncio.TimeoutError:
-                my_bar.progress(100, text="搜索操作超时(30秒)")
-                st.error("搜索操作超时(30秒)，服务器响应时间过长")
-                return {"error": "搜索操作超时(30秒)，服务器响应时间过长"}
-            except Exception as e:
-                my_bar.progress(100, text=f"MCP连接异常: {type(e).__name__}")
-                st.error(f"MCP连接异常: {type(e).__name__}: {e}")
-                return {"error": f"MCP连接异常: {type(e).__name__}: {e}"}
+                                        search_progress.progress(100)
+                                        search_status.error("搜索结果格式不正确")
+                                        return {"error": "搜索结果格式不正确，缺少result属性"}
+                                except Exception as e:
+                                    search_progress.progress(100)
+                                    search_status.error(f"调用web-search工具时出错: {str(e)}")
+                                    return {"error": f"调用web-search工具时出错: {str(e)}"}
+                except asyncio.TimeoutError:
+                    search_progress.progress(100)
+                    search_status.error("搜索操作超时(30秒)")
+                    return {"error": "搜索操作超时(30秒)，服务器响应时间过长"}
+                except Exception as e:
+                    search_progress.progress(100)
+                    search_status.error(f"MCP连接异常: {type(e).__name__}")
+                    return {"error": f"MCP连接异常: {type(e).__name__}: {e}"}
         except Exception as e:
             error_msg = f"执行Web搜索时出错: {str(e)}"
             traceback_str = traceback.format_exc()
