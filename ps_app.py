@@ -17,6 +17,13 @@ from agents.ps_analyzer import PSAnalyzer
 from agents.ps_rewriter import PSRewriter
 from config.prompts import load_prompts, save_prompts
 
+# Import LangSmith for tracing
+try:
+    import langsmith
+    LANGSMITH_AVAILABLE = True
+except ImportError:
+    LANGSMITH_AVAILABLE = False
+
 # Set page configuration
 st.set_page_config(
     page_title="PS Assistant Tool",
@@ -55,6 +62,8 @@ if "ps_analyzer_model" not in st.session_state:
     st.session_state.ps_analyzer_model = "qwen/qwen-max"
 if "ps_rewriter_model" not in st.session_state:
     st.session_state.ps_rewriter_model = "anthropic/claude-3-7-sonnet"
+if "langsmith_initialized" not in st.session_state:
+    st.session_state.langsmith_initialized = False
 
 # 支持的模型列表（每个Agent的可选模型）
 INFO_COLLECTOR_MODELS = [
@@ -76,12 +85,38 @@ PS_REWRITER_MODELS = [
     "qwen/qwen-max"
 ]
 
+# 初始化LangSmith跟踪
+def initialize_langsmith():
+    """初始化LangSmith用于跟踪AI代理的工作过程"""
+    if not LANGSMITH_AVAILABLE:
+        return False
+    
+    try:
+        # 从Streamlit secrets获取LangSmith API密钥
+        langsmith_api_key = st.secrets.get("LANGSMITH_API_KEY", "")
+        langsmith_project = st.secrets.get("LANGSMITH_PROJECT", "applicant-analysis-tool")
+        
+        if not langsmith_api_key:
+            return False
+        
+        # 设置环境变量
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_API_KEY"] = langsmith_api_key
+        os.environ["LANGCHAIN_PROJECT"] = langsmith_project
+        
+        return True
+    except Exception as e:
+        st.error(f"初始化LangSmith时出错: {str(e)}")
+        return False
+
 # 检查必要的API密钥是否设置
 def check_api_keys():
     """检查Streamlit secrets中是否设置了必要的API密钥。"""
     api_keys = {
         "OPENROUTER_API_KEY": st.secrets.get("OPENROUTER_API_KEY", None),
-        "SERPER_API_KEY": st.secrets.get("SERPER_API_KEY", None)
+        "SERPER_API_KEY": st.secrets.get("SERPER_API_KEY", None),
+        "SMITHERY_API_KEY": st.secrets.get("SMITHERY_API_KEY", None),
+        "LANGSMITH_API_KEY": st.secrets.get("LANGSMITH_API_KEY", None)
     }
     
     return {k: bool(v) for k, v in api_keys.items()}
@@ -145,6 +180,12 @@ def create_downloadable_report(report_title, report_content):
 
 # Main function
 def main():
+    # 尝试初始化LangSmith（只在应用启动时执行一次）
+    if not st.session_state.langsmith_initialized and LANGSMITH_AVAILABLE:
+        st.session_state.langsmith_initialized = initialize_langsmith()
+        if st.session_state.langsmith_initialized:
+            st.success("LangSmith跟踪已初始化，将记录AI代理的工作过程")
+    
     # Create tabs
     tab1, tab2, tab3 = st.tabs(["PS处理助手", "提示词调试", "系统状态"])
     
