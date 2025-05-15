@@ -342,21 +342,31 @@ class PSInfoCollector:
             请在你的分析中考虑这些特定要求。
             """
             
+        # 从配置文件加载提示词
+        import os
+        import sys
+        import json
+        
+        # 添加父目录到路径以便正确导入
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        from config.prompts import load_prompts
+        
+        prompts = load_prompts()
+        
+        # 获取PSInfoCollector的角色、任务和输出格式提示词
+        role = prompts["ps_info_collector"]["role"]
+        task = prompts["ps_info_collector"]["task"]
+        output_format = prompts["ps_info_collector"]["output"]
+        
         # 构建最终提示
         prompt = f"""
         # 角色: 院校信息收集专家
         
-        你是一位专业的高等教育顾问，专门负责收集和分析国际高校的招生信息。你的专长是整理与总结硕士研究生项目的重要信息，特别是针对国际学生申请者的相关要求和流程。
+        {role}
         
         # 任务
         
-        请基于提供的搜索结果和你的知识，全面准确地收集并整理以下关于{university}的{major}专业的关键信息:
-        
-        1. 项目概述：项目名称、学位类型、学制时长、重要特色
-        2. 申请要求：学历背景、语言要求(雅思/托福分数)、GPA要求或其他学术标准
-        3. 申请流程：申请截止日期、所需材料、申请费用等
-        4. 课程结构：核心课程、选修方向、特色课程、实习或研究机会
-        5. 相关资源：项目官网链接、招生办联系方式
+        {task}
         
         {custom_req_text}
         
@@ -366,27 +376,7 @@ class PSInfoCollector:
         
         # 输出格式
         
-        请将你的回答组织为一份专业的信息收集报告，格式如下：
-        
-        # {university} {major}专业信息收集报告
-        
-        ## 项目概览
-        [简要描述项目的基本情况和主要特点]
-        
-        ## 申请要求
-        [详细列出申请该项目所需满足的条件]
-        
-        ## 申请流程
-        [列出申请步骤、截止日期和所需材料]
-        
-        ## 课程设置
-        [介绍课程结构、核心课程和特色内容]
-        
-        ## 相关资源
-        [提供重要链接和联系方式]
-        
-        ## 信息来源
-        [列出本报告的信息来源，如搜索结果或模型知识]
+        {output_format.replace("[大学名称]", university).replace("[专业名称]", major)}
         
         重要提示：
         1. 优先使用搜索结果中的信息，并引用信息来源
