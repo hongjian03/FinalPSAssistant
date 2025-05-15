@@ -262,16 +262,61 @@ class PSInfoCollector:
             return error_msg
     
     def _build_info_prompt(self, university: str, major: str, search_results: Dict[str, Any], custom_requirements: str) -> str:
-        """构建带有搜索结果的提示"""
-        # 格式化搜索结果
-        formatted_results = ""
-        if search_results and "organic" in search_results:
-            for i, result in enumerate(search_results.get("organic", [])[:5], 1):
-                title = result.get("title", "No title")
-                link = result.get("link", "No link")
-                snippet = result.get("snippet", "No snippet")
-                formatted_results += f"{i}. {title}\nURL: {link}\n摘要: {snippet}\n\n"
+        """
+        构建用于生成院校信息报告的提示。
         
+        Args:
+            university: 目标大学
+            major: 目标专业
+            search_results: Web搜索结果
+            custom_requirements: 用户的自定义要求
+            
+        Returns:
+            生成的提示文本
+        """
+        # 准备搜索结果摘要
+        search_content = ""
+        
+        # 确保我们有有机搜索结果
+        if "organic" in search_results and search_results["organic"]:
+            # 限制为最相关的前5个结果
+            relevant_results = search_results["organic"][:5]
+            
+            search_content += "以下是从Web搜索获取的相关信息：\n\n"
+            
+            # 添加每个搜索结果
+            for i, result in enumerate(relevant_results, 1):
+                title = result.get("title", "无标题")
+                link = result.get("link", "无链接")
+                snippet = result.get("snippet", result.get("description", "无内容摘要"))
+                
+                search_content += f"信息源 {i}: {title}\n"
+                search_content += f"链接: {link}\n"
+                search_content += f"摘要: {snippet}\n\n"
+        # 兼容其他可能的结果格式
+        elif "results" in search_results and search_results["results"]:
+            # 适配一些搜索API返回的不同结构
+            relevant_results = search_results["results"][:5]
+            
+            search_content += "以下是从Web搜索获取的相关信息：\n\n"
+            
+            # 添加每个搜索结果
+            for i, result in enumerate(relevant_results, 1):
+                title = result.get("title", "无标题")
+                link = result.get("link", result.get("url", "无链接"))
+                snippet = result.get("snippet", result.get("description", result.get("content", "无内容摘要")))
+                
+                search_content += f"信息源 {i}: {title}\n"
+                search_content += f"链接: {link}\n"
+                search_content += f"摘要: {snippet}\n\n"
+        # 如果没有结构化的搜索结果，但有原始文本响应
+        elif isinstance(search_results, str) and len(search_results) > 0:
+            search_content += "以下是从Web搜索获取的相关信息：\n\n"
+            search_content += search_results[:2000] + "..." if len(search_results) > 2000 else search_results
+            search_content += "\n\n"
+        else:
+            search_content = "未找到相关搜索结果。请基于模型知识提供可能的信息，并明确标注是估计的信息。\n\n"
+            
         # 添加自定义要求（如果有）
         custom_req_text = ""
         if custom_requirements and custom_requirements.strip():
@@ -281,8 +326,8 @@ class PSInfoCollector:
             
             请在你的分析中考虑这些特定要求。
             """
-        
-        # 构建完整提示
+            
+        # 构建最终提示
         prompt = f"""
         # 角色: 院校信息收集专家
         
@@ -290,21 +335,19 @@ class PSInfoCollector:
         
         # 任务
         
-        请基于提供的网络搜索结果，全面收集并整理以下关于{university}的{major}专业的关键信息:
+        请基于提供的搜索结果和你的知识，全面准确地收集并整理以下关于{university}的{major}专业的关键信息:
         
         1. 项目概述：项目名称、学位类型、学制时长、重要特色
         2. 申请要求：学历背景、语言要求(雅思/托福分数)、GPA要求或其他学术标准
         3. 申请流程：申请截止日期、所需材料、申请费用等
         4. 课程结构：核心课程、选修方向、特色课程、实习或研究机会
-        5. 相关资源：项目官网链接、招生办联系方式、常见问题解答
+        5. 相关资源：项目官网链接、招生办联系方式
+        
+        {custom_req_text}
         
         # 搜索结果
         
-        以下是关于{university}的{major}项目的网络搜索结果:
-        
-        {formatted_results}
-        
-        {custom_req_text}
+        {search_content}
         
         # 输出格式
         
@@ -328,7 +371,14 @@ class PSInfoCollector:
         [提供重要链接和联系方式]
         
         ## 信息来源
-        [列出本报告的信息来源]
+        [列出本报告的信息来源，如搜索结果或模型知识]
+        
+        重要提示：
+        1. 优先使用搜索结果中的信息，并引用信息来源
+        2. 如果搜索结果中缺少某些信息，可以使用你的知识进行补充，但请明确指出这部分是估计信息
+        3. 保持客观专业的语气，专注于事实性信息
+        4. 如有冲突信息，请分析优先采用最可靠的来源（如官方网站信息）
+        5. 不要编造不存在的信息，如不确定，请明确说明
         """
         
         return prompt
