@@ -9,6 +9,9 @@ aiohttp
 langchain
 langchain-openai
 langsmith
-mcp-client>=0.2.0
-mcp>=0.2.0
+mcp-client
+mcp
 websockets
+python-dotenv
+pydantic
+openai
