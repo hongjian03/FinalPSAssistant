@@ -90,10 +90,34 @@ def check_api_keys():
 # Asynchronously initialize the Serper client
 async def init_serper():
     """Initialize the Serper client asynchronously."""
-    serper_client = SerperClient()
-    result = await serper_client.initialize()
-    st.session_state.serper_initialized = result
-    return result
+    try:
+        # 检查API密钥
+        api_key_status = check_api_keys()
+        if not api_key_status.get("SERPER_API_KEY", False) or not api_key_status.get("SMITHERY_API_KEY", False):
+            st.error("无法初始化Serper客户端: 缺少必要的API密钥。请确保SERPER_API_KEY和SMITHERY_API_KEY已设置。")
+            return False
+        
+        # 创建新的Serper客户端实例
+        serper_client = SerperClient()
+        
+        # 尝试初始化
+        with st.status("正在初始化Serper MCP客户端...") as status:
+            status.write("正在检查Serper API连接...")
+            result = await serper_client.initialize()
+            
+            if result:
+                status.update(label="Serper客户端初始化成功", state="complete")
+                st.session_state.serper_initialized = True
+                st.session_state.serper_client = serper_client  # 保存客户端实例以便重用
+                return True
+            else:
+                status.update(label="Serper客户端初始化失败", state="error")
+                st.session_state.serper_initialized = False
+                return False
+    except Exception as e:
+        st.error(f"初始化Serper客户端时发生异常: {str(e)}")
+        st.session_state.serper_initialized = False
+        return False
 
 # 支持的模型列表
 SUPPORTED_MODELS = [
@@ -188,6 +212,18 @@ def create_downloadable_report(report_title, report_content):
 def main():
     # Create tabs
     tab1, tab2, tab3 = st.tabs(["Competitiveness Analysis", "Prompt Debugging", "System Status"])
+    
+    # 首次加载应用时尝试初始化Serper客户端（仅执行一次）
+    if "serper_initialized" not in st.session_state:
+        st.session_state.serper_initialized = False
+        st.session_state.serper_init_attempted = False
+    
+    # 仅在第一次运行时尝试初始化，避免每次页面刷新都重新连接
+    if not st.session_state.serper_init_attempted:
+        with st.spinner("正在初始化网络搜索功能..."):
+            import asyncio
+            asyncio.run(init_serper())
+            st.session_state.serper_init_attempted = True
     
     with tab1:
         st.title("Applicant Competitiveness Analysis Tool")
@@ -505,18 +541,18 @@ def main():
         # Serper MCP server status
         st.subheader("Serper MCP Server")
         
-        # 初始化Serper客户端按钮，不使用表单
-        if not st.session_state.serper_initialized:
-            if st.button("初始化 Serper 客户端"):
-                with st.spinner("正在初始化 Serper 客户端..."):
-                    import asyncio
-                    asyncio.run(init_serper())
-        
-        # Display Serper client status
+        # 显示当前状态
         if st.session_state.serper_initialized:
-            st.success("✅ Serper 客户端已成功初始化")
+            st.success("✅ Serper 客户端已成功初始化，可以进行网络搜索")
         else:
-            st.warning("⚠️ Serper 客户端未初始化。点击上方按钮进行初始化。")
+            st.warning("⚠️ Serper 客户端未初始化或初始化失败")
+        
+        # 初始化Serper客户端按钮
+        if st.button("重新初始化 Serper 客户端"):
+            with st.spinner("正在初始化 Serper 客户端..."):
+                import asyncio
+                asyncio.run(init_serper())
+                st.rerun()  # 重新加载页面以更新状态
         
         # Add some help text
         st.markdown("""
