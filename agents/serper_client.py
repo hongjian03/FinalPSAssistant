@@ -228,7 +228,7 @@ class SerperClient:
         # Create a container for the progress display if not provided
         if main_container is None:
             main_container = st.container()
-            
+        
         try:
             with main_container:
                 st.subheader(f"执行搜索: {query}")
@@ -290,20 +290,51 @@ class SerperClient:
                                                     
                                                     try:
                                                         # 根据工具名称选择参数
-                                                        args = {"query": query}
+                                                        tool_name = self.search_tool_name
+                                                        args = None
                                                         
-                                                        # 对于google_search工具，添加必要的参数
-                                                        if self.search_tool_name == "google_search":
-                                                            args["numResults"] = 5
-                                                            args["includeSnippets"] = True
-                                                        # 对于scrape工具使用url参数
-                                                        elif self.search_tool_name == "scrape":
-                                                            # 为scrape工具构建URL
+                                                        # 对于不同的工具使用不同的参数格式
+                                                        if tool_name == "google_search":
+                                                            # google_search需要gl和hl参数
+                                                            args = {
+                                                                "query": query,
+                                                                "gl": "us",
+                                                                "hl": "en",
+                                                                "numResults": 5
+                                                            }
+                                                        elif tool_name == "search" or tool_name == "serper-search" or tool_name == "serper":
+                                                            # 其他搜索工具可能只需要query
+                                                            args = {
+                                                                "query": query
+                                                            }
+                                                        elif tool_name == "scrape":
+                                                            # scrape工具使用url参数
                                                             search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
                                                             args = {"url": search_url}
+                                                        else:
+                                                            # 默认尝试只提供query
+                                                            args = {"query": query}
                                                         
-                                                        # 使用动态确定的搜索工具名称和相应参数
-                                                        result = await session.call_tool(self.search_tool_name, arguments=args)
+                                                        # 记录调用信息
+                                                        search_status.info(f"调用 {tool_name} 工具，参数: {args}")
+                                                        st.caption("如果搜索失败，可能需要额外的参数，将自动尝试不同参数组合")
+                                                        
+                                                        # 调用工具
+                                                        try:
+                                                            result = await session.call_tool(tool_name, arguments=args)
+                                                        except Exception as tool_error:
+                                                            error_msg = str(tool_error)
+                                                            # 如果是参数错误，尝试添加gl和hl参数
+                                                            if "query" in error_msg.lower() and "required" in error_msg.lower():
+                                                                search_status.warning(f"参数错误，尝试添加gl和hl参数: {error_msg}")
+                                                                # 添加额外参数再试一次
+                                                                args["gl"] = "us"
+                                                                args["hl"] = "en"
+                                                                search_status.info(f"重试 {tool_name} 工具，参数: {args}")
+                                                                result = await session.call_tool(tool_name, arguments=args)
+                                                            else:
+                                                                # 其他错误则直接抛出
+                                                                raise tool_error
                                                         
                                                         search_progress.progress(90)
                                                         search_status.info("处理搜索结果...")
@@ -394,9 +425,14 @@ class SerperClient:
                                                         error_msg = str(e)
                                                         search_progress.progress(100)
                                                         
-                                                        # 检查是否存在TaskGroup相关错误
+                                                        # 检查是否存在TaskGroup相关错误或参数错误
                                                         if "TaskGroup" in error_msg:
                                                             search_status.warning(f"MCP出现TaskGroup错误，尝试备用搜索方法...")
+                                                            st.info("正在使用备用搜索方法...")
+                                                            # 使用备用的搜索方法
+                                                            return await self._fallback_search(query, search_progress, search_status)
+                                                        elif "query" in error_msg.lower() and "required" in error_msg.lower():
+                                                            search_status.warning(f"API参数错误: {error_msg}，尝试备用搜索方法...")
                                                             st.info("正在使用备用搜索方法...")
                                                             # 使用备用的搜索方法
                                                             return await self._fallback_search(query, search_progress, search_status)
@@ -408,9 +444,14 @@ class SerperClient:
                                                     error_msg = str(e)
                                                     search_progress.progress(100)
                                                     
-                                                    # 检查是否存在TaskGroup相关错误
+                                                    # 检查是否存在TaskGroup相关错误或参数错误
                                                     if "TaskGroup" in error_msg:
                                                         search_status.warning(f"MCP会话初始化时出现TaskGroup错误，尝试备用搜索方法...")
+                                                        st.info("正在使用备用搜索方法...")
+                                                        # 使用备用的搜索方法
+                                                        return await self._fallback_search(query, search_progress, search_status)
+                                                    elif "query" in error_msg.lower() and "required" in error_msg.lower():
+                                                        search_status.warning(f"API参数错误: {error_msg}，尝试备用搜索方法...")
                                                         st.info("正在使用备用搜索方法...")
                                                         # 使用备用的搜索方法
                                                         return await self._fallback_search(query, search_progress, search_status)
@@ -522,7 +563,7 @@ class SerperClient:
             # 更新UI
             if progress_bar and status_text:
                 progress_bar.progress(30)
-                status_text.info("使用备用搜索方法...")
+                status_text.info("使用直接API搜索...")
             
             # 直接使用Serper API进行搜索
             if not self.serper_api_key:
@@ -559,13 +600,17 @@ class SerperClient:
                 "hl": "en"
             }
             
+            # 记录搜索参数
+            if progress_bar and status_text:
+                status_text.info(f"搜索参数: query={query}, gl=us, hl=en")
+            
             # 发送请求到Serper API
             response = requests.post(serper_url, headers=headers, json=payload)
             
             # 更新UI
             if progress_bar and status_text:
                 progress_bar.progress(80)
-                status_text.info("处理备用搜索结果...")
+                status_text.info(f"处理备用搜索结果... (状态码: {response.status_code})")
             
             # 检查响应
             if response.status_code == 200:
@@ -603,6 +648,13 @@ class SerperClient:
                 if progress_bar and status_text:
                     progress_bar.progress(100)
                     status_text.error(f"备用搜索失败: {response.status_code}")
+                    
+                    # 显示响应内容以帮助调试
+                    try:
+                        error_content = response.json()
+                        st.error(f"API错误: {json.dumps(error_content)}")
+                    except:
+                        st.error(f"API响应: {response.text}")
                 
                 return {
                     "error": f"备用搜索API调用失败: {response.status_code} - {response.text}",
