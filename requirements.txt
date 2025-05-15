@@ -6,3 +6,5 @@ markitdown
 requests
 asyncio
 aiohttp
+langchain
+langchain-openai
