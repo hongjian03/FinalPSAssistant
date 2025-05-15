@@ -213,22 +213,28 @@ def main():
             with col2:
                 if st.button("生成院校信息报告", disabled=not generate_enabled, key="generate_uni_info", use_container_width=True):
                     if university and major:
-                        # 创建院校信息收集代理
-                        info_collector = PSInfoCollector(model_name=st.session_state.info_collector_model)
+                        # 创建一个专门的容器来持有整个信息收集过程
+                        collection_container = st.container()
                         
-                        # 收集院校信息 - 进度条会直接显示在主界面上
-                        university_info = asyncio.run(info_collector.collect_information(
-                            university=university,
-                            major=major,
-                            custom_requirements="" # 保留参数但传入空字符串
-                        ))
-                        
-                        # 保存院校信息报告
-                        st.session_state.university_info_report = university_info
-                        
-                        # 更新步骤
-                        st.session_state.current_step = 2
-                        st.rerun()
+                        with collection_container:
+                            st.subheader(f"{university} {major} 专业信息收集中...")
+                            
+                            # 创建院校信息收集代理
+                            info_collector = PSInfoCollector(model_name=st.session_state.info_collector_model)
+                            
+                            # 收集院校信息 - 进度条会直接显示在上面创建的容器中
+                            university_info = asyncio.run(info_collector.collect_information(
+                                university=university,
+                                major=major,
+                                custom_requirements="" # 保留参数但传入空字符串
+                            ))
+                            
+                            # 保存院校信息报告
+                            st.session_state.university_info_report = university_info
+                            
+                            # 更新步骤
+                            st.session_state.current_step = 2
+                            st.rerun()
         
         # 步骤2：上传支持文件和PS初稿，生成分析报告
         elif st.session_state.current_step == 2:
