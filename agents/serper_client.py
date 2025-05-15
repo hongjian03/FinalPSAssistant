@@ -7,6 +7,8 @@ import streamlit as st
 import traceback
 import mcp
 from mcp.client.streamable_http import streamablehttp_client
+import requests
+import time
 
 class SerperClient:
     """
@@ -394,28 +396,56 @@ class SerperClient:
                                                         
                                                         # 检查是否存在TaskGroup相关错误
                                                         if "TaskGroup" in error_msg:
-                                                            search_status.error(f"执行搜索时出现TaskGroup错误")
-                                                            st.error(f"执行搜索时出现TaskGroup错误，这可能是Python版本兼容性问题。错误详情: {error_msg}")
-                                                            raise Exception(f"TaskGroup错误: {error_msg}")
+                                                            search_status.warning(f"MCP出现TaskGroup错误，尝试备用搜索方法...")
+                                                            st.info("正在使用备用搜索方法...")
+                                                            # 使用备用的搜索方法
+                                                            return await self._fallback_search(query, search_progress, search_status)
                                                         else:
                                                             search_status.error(f"调用{self.search_tool_name}工具时出错")
                                                             st.error(f"调用{self.search_tool_name}工具出错: {error_msg}")
                                                             raise e
                                                 except Exception as e:
+                                                    error_msg = str(e)
                                                     search_progress.progress(100)
-                                                    search_status.error(f"MCP会话初始化失败")
-                                                    st.error(f"MCP会话初始化失败: {str(e)}")
-                                                    raise e
+                                                    
+                                                    # 检查是否存在TaskGroup相关错误
+                                                    if "TaskGroup" in error_msg:
+                                                        search_status.warning(f"MCP会话初始化时出现TaskGroup错误，尝试备用搜索方法...")
+                                                        st.info("正在使用备用搜索方法...")
+                                                        # 使用备用的搜索方法
+                                                        return await self._fallback_search(query, search_progress, search_status)
+                                                    else:
+                                                        search_status.error(f"MCP会话初始化失败")
+                                                        st.error(f"MCP会话初始化失败: {error_msg}")
+                                                        raise e
                                         except Exception as e:
+                                            error_msg = str(e)
                                             search_progress.progress(100)
-                                            search_status.error(f"MCP会话创建失败")
-                                            st.error(f"MCP会话创建失败: {str(e)}")
-                                            raise e
+                                            
+                                            # 检查是否存在TaskGroup相关错误
+                                            if "TaskGroup" in error_msg:
+                                                search_status.warning(f"MCP会话创建时出现TaskGroup错误，尝试备用搜索方法...")
+                                                st.info("正在使用备用搜索方法...")
+                                                # 使用备用的搜索方法
+                                                return await self._fallback_search(query, search_progress, search_status)
+                                            else:
+                                                search_status.error(f"MCP会话创建失败")
+                                                st.error(f"MCP会话创建失败: {error_msg}")
+                                                raise e
                                 except Exception as e:
+                                    error_msg = str(e)
                                     search_progress.progress(100)
-                                    search_status.error(f"HTTP流连接失败")
-                                    st.error(f"HTTP流连接失败: {str(e)}")
-                                    raise e
+                                    
+                                    # 检查是否存在TaskGroup相关错误
+                                    if "TaskGroup" in error_msg:
+                                        search_status.warning(f"HTTP流连接时出现TaskGroup错误，尝试备用搜索方法...")
+                                        st.info("正在使用备用搜索方法...")
+                                        # 使用备用的搜索方法
+                                        return await self._fallback_search(query, search_progress, search_status)
+                                    else:
+                                        search_status.error(f"HTTP流连接失败")
+                                        st.error(f"HTTP流连接失败: {error_msg}")
+                                        raise e
                         except asyncio.TimeoutError:
                             search_progress.progress(100)
                             search_status.error(f"搜索操作超时(30秒)")
@@ -428,17 +458,10 @@ class SerperClient:
                         error_msg = str(e)
                         error_type = type(e).__name__
                         
-                        # 检查是否为TaskGroup错误，如果是，立即返回不再重试
+                        # 检查是否为TaskGroup错误，如果是，使用备用搜索方法
                         if "TaskGroup" in error_msg:
-                            search_status.error("任务组错误，搜索失败")
-                            return {
-                                "error": f"执行搜索时出现任务组错误，这可能与Python版本或MCP服务器有关: {error_msg}",
-                                "organic": [{
-                                    "title": f"搜索失败: {query}",
-                                    "link": "",
-                                    "snippet": "搜索过程中出现TaskGroup错误。这通常是由于Python版本兼容性问题或MCP服务器问题导致。尝试使用Python 3.10+可能解决此问题。"
-                                }]
-                            }
+                            search_status.warning(f"检测到TaskGroup错误，使用备用搜索方法...")
+                            return await self._fallback_search(query, search_progress, search_status)
                         
                         search_status.warning(f"搜索尝试 {retry_count}/{self.max_retries} 失败，正在重试...")
                         await asyncio.sleep(1)  # Wait before retrying
@@ -454,6 +477,12 @@ class SerperClient:
                     else:
                         error_msg = str(last_error)
                         error_type = type(last_error).__name__
+                        
+                        # 如果是TaskGroup错误，使用备用搜索方法
+                        if "TaskGroup" in error_msg:
+                            search_status.warning(f"多次尝试后仍出现TaskGroup错误，使用备用搜索方法...")
+                            return await self._fallback_search(query, search_progress, search_status)
+                            
                         search_status.error(f"多次尝试后仍然出错: {error_type}")
                         
                         return {"error": f"多次尝试后搜索仍然失败: {error_msg}",
@@ -465,14 +494,145 @@ class SerperClient:
             
             with main_container:
                 if "TaskGroup" in error_msg:
-                    st.error(f"执行Web搜索时出现TaskGroup错误，这可能是由于Python版本兼容性问题。")
-                    st.info("尝试使用Python 3.10+版本可能会解决此问题，或者检查MCP服务器状态。")
+                    search_status = st.empty()
+                    search_progress = st.progress(0)
+                    search_status.warning(f"执行Web搜索时出现TaskGroup错误，使用备用搜索方法...")
+                    # 使用备用搜索方法
+                    return await self._fallback_search(query, search_progress, search_status)
                 else:
                     st.error(f"执行Web搜索时出错: {error_msg}")
             
             return {"error": f"执行Web搜索时出错: {error_msg}", 
                     "organic": [{"title": "搜索系统错误", "link": "", 
                     "snippet": f"执行搜索时遇到系统错误: {error_type}: {error_msg[:200]}..."}]}
+    
+    async def _fallback_search(self, query: str, progress_bar=None, status_text=None) -> Dict[str, Any]:
+        """
+        备用搜索方法，直接使用Serper API而不通过MCP，避免TaskGroup错误。
+        
+        Args:
+            query: 搜索查询
+            progress_bar: 进度条组件
+            status_text: 状态文本组件
+            
+        Returns:
+            搜索结果字典
+        """
+        try:
+            # 更新UI
+            if progress_bar and status_text:
+                progress_bar.progress(30)
+                status_text.info("使用备用搜索方法...")
+            
+            # 直接使用Serper API进行搜索
+            if not self.serper_api_key:
+                if progress_bar and status_text:
+                    progress_bar.progress(100)
+                    status_text.error("缺少Serper API密钥")
+                
+                return {
+                    "error": "缺少Serper API密钥，无法执行备用搜索",
+                    "organic": [
+                        {
+                            "title": f"无法搜索: {query}",
+                            "link": "",
+                            "snippet": "系统缺少Serper API密钥，无法执行备用搜索。请检查配置。"
+                        }
+                    ]
+                }
+            
+            # 更新UI
+            if progress_bar and status_text:
+                progress_bar.progress(50)
+                status_text.info(f"直接调用Serper API搜索: {query}")
+            
+            # 构建Serper API请求
+            serper_url = "https://google.serper.dev/search"
+            headers = {
+                "X-API-KEY": self.serper_api_key,
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "q": query,
+                "gl": "us",
+                "hl": "en"
+            }
+            
+            # 发送请求到Serper API
+            response = requests.post(serper_url, headers=headers, json=payload)
+            
+            # 更新UI
+            if progress_bar and status_text:
+                progress_bar.progress(80)
+                status_text.info("处理备用搜索结果...")
+            
+            # 检查响应
+            if response.status_code == 200:
+                data = response.json()
+                
+                # 标准化结果格式
+                if "organic" in data:
+                    # 更新UI
+                    if progress_bar and status_text:
+                        progress_bar.progress(100)
+                        status_text.success(f"备用搜索成功，找到 {len(data['organic'])} 条结果")
+                    
+                    return data
+                else:
+                    # 创建一个标准格式的结果
+                    formatted_results = {"organic": []}
+                    
+                    # 处理可能的不同结果格式
+                    if "results" in data:
+                        for item in data["results"]:
+                            formatted_results["organic"].append({
+                                "title": item.get("title", "无标题"),
+                                "link": item.get("link", ""),
+                                "snippet": item.get("snippet", "无摘要")
+                            })
+                    
+                    # 更新UI
+                    if progress_bar and status_text:
+                        progress_bar.progress(100)
+                        status_text.success(f"备用搜索成功，找到 {len(formatted_results['organic'])} 条结果")
+                    
+                    return formatted_results
+            else:
+                # 处理API错误
+                if progress_bar and status_text:
+                    progress_bar.progress(100)
+                    status_text.error(f"备用搜索失败: {response.status_code}")
+                
+                return {
+                    "error": f"备用搜索API调用失败: {response.status_code} - {response.text}",
+                    "organic": [
+                        {
+                            "title": f"搜索失败: {query}",
+                            "link": "",
+                            "snippet": f"备用搜索请求失败，状态码: {response.status_code}。请尝试其他搜索方法。"
+                        }
+                    ]
+                }
+        except Exception as e:
+            error_msg = str(e)
+            
+            # 更新UI
+            if progress_bar and status_text:
+                progress_bar.progress(100)
+                status_text.error(f"备用搜索出错: {error_msg}")
+            
+            # 使用模拟数据
+            return {
+                "error": f"备用搜索方法出错: {error_msg}",
+                "organic": [
+                    {
+                        "title": f"搜索查询: {query}",
+                        "link": f"https://www.google.com/search?q={query.replace(' ', '+')}",
+                        "snippet": "由于搜索功能暂时不可用，请直接访问Google搜索此查询。备用搜索方法也失败了。"
+                    }
+                ]
+            }
     
     def run_async(self, coroutine):
         """Helper method to run async methods synchronously."""
