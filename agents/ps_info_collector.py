@@ -47,14 +47,16 @@ class PSInfoCollector:
             # 创建主容器用于显示所有内容
             main_container = st.container()
             
-            # 确保Serper客户端初始化
+            # 创建初始化容器
             with main_container:
+                st.subheader("初始化网络搜索功能")
+                
+                # 创建专门的容器来显示初始化进度
                 init_container = st.container()
                 with init_container:
-                    st.subheader("初始化网络搜索")
                     st.info("正在初始化MCP连接以执行Web搜索...")
             
-            # 尝试初始化Serper客户端
+            # 尝试初始化Serper客户端，传递容器确保UI在主区域显示
             initialized = await self.serper_client.initialize(main_container=init_container)
             if not initialized:
                 with main_container:
