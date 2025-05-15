@@ -136,6 +136,7 @@
 
 1. **Agent 1 (院校信息收集代理)**：
    - 搜索并分析目标院校和专业的信息
+   - 使用MCP集成的网络搜索获取最新院校数据
    - 生成结构化的院校信息收集报告
    - 包含项目概览、申请要求、课程设置等信息
 
@@ -158,6 +159,8 @@
 
 - 支持多种文件格式（PDF、DOC、DOCX、TXT、图片等）
 - 各代理支持不同的AI模型选择（Claude、GPT-4、Qwen等）
+- 使用MCP (Marcopesani Client Protocol) 进行网络搜索集成
+- LangSmith集成用于跟踪和分析AI代理的工作过程
 - 提供自定义提示词配置接口
 - 所有报告可导出为Word文档
 
@@ -169,6 +172,8 @@
 - 必要API密钥:
   - OpenRouter API密钥 (用于AI模型调用)
   - Serper API密钥 (用于网络搜索)
+  - Smithery API密钥 (用于MCP服务器访问)
+  - LangSmith API密钥 (用于追踪AI代理工作流程，可选)
 
 ### 安装步骤
 
@@ -184,11 +189,19 @@ pip install -r requirements.txt
 ```
 
 3. 设置API密钥
-   - 创建`.streamlit/secrets.toml`文件
+   - 复制`.streamlit/secrets.toml.example`文件为`.streamlit/secrets.toml`
    - 添加以下内容：
 ```toml
-OPENROUTER_API_KEY = "your-openrouter-api-key"
-SERPER_API_KEY = "your-serper-api-key"
+# OpenRouter API密钥 (用于访问所有LLM模型)
+OPENROUTER_API_KEY = "your_openrouter_api_key_here"
+
+# Serper Web搜索 API (用于项目推荐)
+SERPER_API_KEY = "your_serper_api_key_here"
+SMITHERY_API_KEY = "your_smithery_api_key_here"
+
+# LangSmith监控 API (用于追踪AI代理的输入输出，可选)
+LANGSMITH_API_KEY = "your_langsmith_api_key_here"
+LANGSMITH_PROJECT = "applicant-analysis-tool"  # 可选项，默认项目名称
 ```
 
 4. 运行应用
@@ -200,8 +213,9 @@ streamlit run ps_app.py
 
 1. **步骤1 - 院校信息收集**：
    - 输入目标院校和专业信息
-   - 系统搜索并整理相关申请要求和项目信息
+   - 系统通过MCP搜索并整理相关申请要求和项目信息
    - 生成院校信息收集报告
+   - 搜索进度和结果显示在主界面上
 
 2. **步骤2 - 文件分析**：
    - 上传支持文件（简历、成绩单等，可选）
@@ -214,6 +228,24 @@ streamlit run ps_app.py
    - 点击"开始改写PS"按钮
    - 系统根据策略改写PS
    - 展示和下载改写后的PS
+
+## MCP网络搜索集成
+
+该工具使用MCP (Marcopesani Client Protocol) 从Serper API获取最新的学校和专业信息：
+
+- 通过streamablehttp_client建立与MCP服务器的连接
+- 搜索院校和专业的最新信息和要求
+- 在界面中显示搜索进度和结果
+- 如果搜索失败，会回退到使用LLM已有知识生成报告
+
+## LangSmith追踪
+
+系统集成了LangSmith用于追踪和分析AI代理的工作过程：
+
+- 记录每个代理的输入和输出
+- 可通过LangSmith控制台查看详细的运行记录
+- 帮助开发者分析和改进AI代理的性能
+- 如未配置LangSmith密钥，该功能不会影响系统正常运行
 
 ## 提示词定制
 
@@ -233,8 +265,13 @@ streamlit run ps_app.py
 - **如何选择不同的AI模型?**
   - 在"提示词调试"选项卡中可以为每个代理选择不同的AI模型
 
-- **是否需要上传支持文件?**
-  - 支持文件是可选的，如果没有提供，系统将跳过支持文件分析环节
+- **如果网络搜索失败怎么办?**
+  - 系统会自动回退到使用LLM的已有知识生成院校信息报告
+  - 请确保已正确配置SERPER_API_KEY和SMITHERY_API_KEY
+  
+- **搜索过程中出现滞后或无响应怎么办?**
+  - 系统设置了30秒的超时时间，超时后会显示错误信息
+  - 请检查网络连接和API密钥是否正确
 
 ## 注意事项
 
