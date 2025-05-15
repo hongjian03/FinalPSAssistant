@@ -29,7 +29,7 @@ class PSAnalyzer:
         # 设置OpenRouter API端点
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
     
-    def analyze_ps(self, ps_file, university_info: str, supporting_file_analysis: str = "未提供支持文件分析") -> str:
+    def analyze_ps(self, ps_file, university_info: str, supporting_file_analysis: str = "未提供支持文件分析", writing_requirements: str = "") -> str:
         """
         分析PS初稿，生成改写策略报告。
         
@@ -37,6 +37,7 @@ class PSAnalyzer:
             ps_file: 上传的PS初稿文件
             university_info: 院校信息收集报告
             supporting_file_analysis: 支持文件分析报告
+            writing_requirements: 用户的PS写作需求
             
         Returns:
             格式化的PS改写策略报告
@@ -52,7 +53,7 @@ class PSAnalyzer:
                 return "无法从PS文件中提取内容，请检查文件格式。"
             
             # 构建提示
-            prompt = self._build_analysis_prompt(ps_content, university_info, supporting_file_analysis)
+            prompt = self._build_analysis_prompt(ps_content, university_info, supporting_file_analysis, writing_requirements)
             
             # 调用OpenRouter API生成报告
             return self._call_openrouter_api(prompt)
@@ -107,8 +108,19 @@ class PSAnalyzer:
         
         return content
     
-    def _build_analysis_prompt(self, ps_content: str, university_info: str, supporting_file_analysis: str) -> str:
+    def _build_analysis_prompt(self, ps_content: str, university_info: str, supporting_file_analysis: str, writing_requirements: str = "") -> str:
         """构建分析提示"""
+        # 处理写作需求
+        writing_req_section = ""
+        if writing_requirements and writing_requirements.strip():
+            writing_req_section = f"""
+        # 用户写作需求
+        
+        ```
+        {writing_requirements}
+        ```
+        """
+        
         # 构建完整提示
         prompt = f"""
         # 角色: PS改写策略专家
@@ -143,6 +155,7 @@ class PSAnalyzer:
         ```
         {supporting_file_analysis}
         ```
+        {writing_req_section}
         
         # 输出格式
         
@@ -187,8 +200,7 @@ class PSAnalyzer:
         
         payload = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 3000
+            "messages": [{"role": "user", "content": prompt}]
         }
         
         with st.spinner(f"使用 {self.model_name} 分析PS初稿，生成改写策略..."):
