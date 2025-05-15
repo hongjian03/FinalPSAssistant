@@ -9,6 +9,6 @@ aiohttp
 langchain
 langchain-openai
 langsmith
-mcp-client>=0.6.3
-mcp>=0.6.3
+mcp-client
+mcp
 websockets
