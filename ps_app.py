@@ -413,20 +413,20 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            # 院校信息收集模型选择
+            # 院校信息收集模型选择 - 强制设置默认值
             info_collector_model = st.selectbox(
                 "选择院校信息收集模型",
                 ["google/gemini-2.0-flash-001", "deepseek/deepseek-chat-v3-0324:free"],
-                index=0 if st.session_state.info_collector_model == "google/gemini-2.0-flash-001" else 1,
+                index=0,  # 强制默认为第一个选项
                 key="info_collector_model_select"
             )
             st.session_state.info_collector_model = info_collector_model
             
-            # PS分析模型选择
+            # PS分析模型选择 - 强制设置默认值
             ps_analyzer_model = st.selectbox(
                 "选择PS分析模型",
                 ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324"],
-                index=0 if st.session_state.ps_analyzer_model == "qwen/qwen-max" else 1,
+                index=0,  # 强制默认为第一个选项
                 key="ps_analyzer_model_select"
             )
             st.session_state.ps_analyzer_model = ps_analyzer_model
@@ -445,7 +445,7 @@ def main():
             ps_rewriter_model = st.selectbox(
                 "选择PS改写模型",
                 ["anthropic/claude-3-7-sonnet", "qwen/qwen-max"],
-                index=0 if st.session_state.ps_rewriter_model == "anthropic/claude-3-7-sonnet" else 1,
+                index=0,  # 强制默认为第一个选项 
                 key="ps_rewriter_model_select"
             )
             st.session_state.ps_rewriter_model = ps_rewriter_model
