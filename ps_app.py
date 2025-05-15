@@ -151,14 +151,6 @@ def main():
             major = st.text_input("目标专业", value=st.session_state.major)
             st.session_state.major = major
             
-            # 添加自定义需求输入
-            custom_requirements = st.text_area(
-                "自定义需求 (可选)",
-                value=st.session_state.custom_requirements,
-                placeholder="输入你对该院校专业的特定要求或问题..."
-            )
-            st.session_state.custom_requirements = custom_requirements
-            
             # 生成院校信息报告按钮 (只有必填字段已填写时启用)
             generate_enabled = university and major
             
@@ -177,7 +169,7 @@ def main():
                             university_info = asyncio.run(info_collector.collect_information(
                                 university=university,
                                 major=major,
-                                custom_requirements=custom_requirements
+                                custom_requirements="" # 保留参数但传入空字符串
                             ))
                             
                             # 保存院校信息报告
@@ -200,9 +192,22 @@ def main():
                 )
                 st.markdown(report_download, unsafe_allow_html=True)
             
+            # 添加返回按钮
+            if st.button("返回院校搜索", key="return_to_search"):
+                st.session_state.current_step = 1
+                st.rerun()
+            
             st.markdown("---")
             
             st.subheader("步骤2：上传支持文件和PS初稿")
+            
+            # 添加写作需求输入
+            writing_requirements = st.text_area(
+                "写作需求",
+                value=st.session_state.custom_requirements,
+                placeholder="输入你的PS写作需求或特殊要求..."
+            )
+            st.session_state.custom_requirements = writing_requirements
             
             col1, col2 = st.columns(2)
             
@@ -274,11 +279,12 @@ def main():
                             ps_content = ps_analyzer._extract_ps_content(ps_file)
                             st.session_state.ps_content = ps_content
                             
-                            # 分析PS初稿
+                            # 分析PS初稿，传递写作需求
                             ps_strategy = ps_analyzer.analyze_ps(
                                 ps_file=st.session_state.ps_file,
                                 university_info=st.session_state.university_info_report,
-                                supporting_file_analysis=st.session_state.supporting_file_analysis
+                                supporting_file_analysis=st.session_state.supporting_file_analysis,
+                                writing_requirements=st.session_state.custom_requirements # 传递写作需求
                             )
                             
                             # 保存PS分析策略报告
