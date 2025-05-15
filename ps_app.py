@@ -416,8 +416,8 @@ def main():
             # 院校信息收集模型选择
             info_collector_model = st.selectbox(
                 "选择院校信息收集模型",
-                INFO_COLLECTOR_MODELS,
-                index=INFO_COLLECTOR_MODELS.index(st.session_state.info_collector_model) if st.session_state.info_collector_model in INFO_COLLECTOR_MODELS else 0,
+                ["google/gemini-2.0-flash-001", "deepseek/deepseek-chat-v3-0324:free"],
+                index=0 if st.session_state.info_collector_model == "google/gemini-2.0-flash-001" else 1,
                 key="info_collector_model_select"
             )
             st.session_state.info_collector_model = info_collector_model
@@ -425,8 +425,8 @@ def main():
             # PS分析模型选择
             ps_analyzer_model = st.selectbox(
                 "选择PS分析模型",
-                PS_ANALYZER_MODELS,
-                index=PS_ANALYZER_MODELS.index(st.session_state.ps_analyzer_model) if st.session_state.ps_analyzer_model in PS_ANALYZER_MODELS else 0,
+                ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324"],
+                index=0 if st.session_state.ps_analyzer_model == "qwen/qwen-max" else 1,
                 key="ps_analyzer_model_select"
             )
             st.session_state.ps_analyzer_model = ps_analyzer_model
@@ -435,8 +435,8 @@ def main():
             # 支持文件分析模型选择
             supporting_analyzer_model = st.selectbox(
                 "选择支持文件分析模型",
-                SUPPORTING_ANALYZER_MODELS,
-                index=SUPPORTING_ANALYZER_MODELS.index(st.session_state.supporting_analyzer_model) if st.session_state.supporting_analyzer_model in SUPPORTING_ANALYZER_MODELS else 0,
+                ["qwen/qwen-max"],
+                index=0,
                 key="supporting_analyzer_model_select"
             )
             st.session_state.supporting_analyzer_model = supporting_analyzer_model
@@ -444,8 +444,8 @@ def main():
             # PS改写模型选择
             ps_rewriter_model = st.selectbox(
                 "选择PS改写模型",
-                PS_REWRITER_MODELS,
-                index=PS_REWRITER_MODELS.index(st.session_state.ps_rewriter_model) if st.session_state.ps_rewriter_model in PS_REWRITER_MODELS else 0,
+                ["anthropic/claude-3-7-sonnet", "qwen/qwen-max"],
+                index=0 if st.session_state.ps_rewriter_model == "anthropic/claude-3-7-sonnet" else 1,
                 key="ps_rewriter_model_select"
             )
             st.session_state.ps_rewriter_model = ps_rewriter_model
