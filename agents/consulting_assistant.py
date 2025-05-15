@@ -32,8 +32,17 @@ class ConsultingAssistant:
         # Set API endpoint for OpenRouter
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         
-        # Initialize the Serper client for web search
-        self.serper_client = SerperClient()
+        # 首先检查session_state中是否有已初始化的SerperClient实例
+        if "serper_client" in st.session_state and st.session_state.serper_initialized:
+            # 使用已初始化的共享实例
+            st.info("使用全局已初始化的Serper客户端实例进行UCL项目搜索")
+            self.serper_client = st.session_state.serper_client
+            self.use_shared_client = True
+        else:
+            # 回退到创建新实例
+            st.warning("未找到已初始化的Serper客户端，将创建新实例。网络搜索功能可能受限。")
+            self.serper_client = SerperClient()
+            self.use_shared_client = False
     
     def search_ucl_programs(self, keywords: List[str]) -> List[Dict[str, str]]:
         """
@@ -47,14 +56,41 @@ class ConsultingAssistant:
         """
         # Use the Serper client to search for programs
         try:
-            # Run the async search method synchronously
-            programs = self.serper_client.run_async(
-                self.serper_client.search_ucl_programs(keywords)
-            )
-            return programs if programs else self.get_mock_programs()
+            # 如果使用的是共享客户端，则直接运行搜索
+            if self.use_shared_client:
+                # Run the async search method synchronously
+                programs = self.serper_client.run_async(
+                    self.serper_client.search_ucl_programs(keywords)
+                )
+                if programs and not any("error" in p for p in programs):
+                    return programs
+                else:
+                    st.warning("UCL项目搜索未返回有效结果，将使用默认项目数据")
+                    return self.get_mock_programs()
+            else:
+                # 如果使用的是新创建的客户端，需要先初始化
+                st.info("初始化Serper客户端以搜索UCL项目...")
+                initialized = self.serper_client.run_async(
+                    self.serper_client.initialize()
+                )
+                
+                if not initialized:
+                    st.error("无法初始化Serper客户端进行UCL项目搜索。请检查API密钥设置。")
+                    return self.get_mock_programs()
+                
+                # 现在尝试搜索
+                programs = self.serper_client.run_async(
+                    self.serper_client.search_ucl_programs(keywords)
+                )
+                if programs and not any("error" in p for p in programs):
+                    return programs
+                else:
+                    st.warning("UCL项目搜索未返回有效结果，将使用默认项目数据")
+                    return self.get_mock_programs()
         except Exception as e:
             st.error(f"Error using Serper for UCL program search: {e}")
             # Fall back to mock data if search fails
+            st.warning("搜索UCL项目时出错，将使用默认项目数据")
             return self.get_mock_programs()
     
     def get_mock_programs(self) -> List[Dict[str, str]]:
