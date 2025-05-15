@@ -46,40 +46,42 @@ class SerperClient:
     
     async def initialize(self, main_container=None):
         """Initialize the connection to the MCP server and get available tools."""
-        # Create a container for the progress display if not provided
+        # 确保有一个可用的容器用于显示进度
         if main_container is None:
             main_container = st.container()
         
-        # Check API keys
+        # 检查API密钥
         if not self.serper_api_key or not self.smithery_api_key:
             with main_container:
                 st.error("无法初始化: SERPER_API_KEY 或 SMITHERY_API_KEY 未设置。")
             return False
             
-        # Check URL format
+        # 检查URL格式
         if not self.url.startswith("https://"):
             with main_container:
                 st.error(f"错误的URL格式: {self.url[:15]}...")
             return False
             
         try:
+            # 所有UI元素都应该在提供的容器内创建
             with main_container:
+                # 创建专用标题
                 st.subheader("MCP连接进度")
                 
-                # 创建专门的进度展示区域，确保进度条靠左对齐
+                # 创建专门的进度展示区域
                 progress_container = st.container()
                 with progress_container:
-                    # Create progress bar and status display
+                    # 创建进度条和状态显示
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     status_text.info("开始初始化Serper MCP服务连接")
                 
-                # Display basic URL info
+                # 显示基本URL信息
                 base_url = self.url.split("?")[0]
                 st.caption(f"连接到服务器: {base_url}")
                 
                 try:
-                    # Set longer timeout
+                    # 设置更长超时
                     with progress_container:
                         status_text.info("准备建立连接 (30秒超时)...")
                         progress_bar.progress(10)
@@ -87,7 +89,7 @@ class SerperClient:
                     
                     try:
                         async with asyncio.timeout(30):
-                            # Connect using streamable HTTP client
+                            # 使用流式HTTP客户端连接
                             with progress_container:
                                 status_text.info("开始HTTP流式连接...")
                                 progress_bar.progress(30)
@@ -102,16 +104,16 @@ class SerperClient:
                                     
                                     try:
                                         async with mcp.ClientSession(read_stream, write_stream) as session:
-                                            # Initialize the connection
+                                            # 初始化连接
                                             with progress_container:
                                                 status_text.info("初始化MCP会话...")
                                                 progress_bar.progress(70)
                                             await asyncio.sleep(0.3)
                                             
-                                            # Initialize connection
+                                            # 初始化连接
                                             await session.initialize()
-                                        
-                                            # List available tools
+                                            
+                                            # 获取可用工具列表
                                             with progress_container:
                                                 status_text.info("获取可用工具列表...")
                                                 progress_bar.progress(85)
