@@ -150,8 +150,7 @@ class PSInfoCollector:
         
         payload = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 2000
+            "messages": [{"role": "user", "content": prompt}]
         }
         
         with st.spinner(f"使用 {self.model_name} 生成院校信息报告..."):
