@@ -53,22 +53,31 @@ class PSRewriter:
     
     def _build_rewrite_prompt(self, ps_content: str, rewrite_strategy: str, university_info: str) -> str:
         """构建改写提示"""
+        # 从配置文件加载提示词
+        import os
+        import sys
+        import json
+        
+        # 添加父目录到路径以便正确导入
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        from config.prompts import load_prompts
+        
+        prompts = load_prompts()
+        
+        # 获取PSRewriter的角色、任务和输出格式提示词
+        role = prompts["ps_rewriter"]["role"]
+        task = prompts["ps_rewriter"]["task"]
+        output_format = prompts["ps_rewriter"]["output"]
+        
         # 构建完整提示
         prompt = f"""
         # 角色: 专业PS改写专家
         
-        你是一位资深的个人陈述(Personal Statement)撰写专家，擅长将初稿改写成高质量的最终版本。你熟悉各类研究生项目的申请要求，能够准确把握院校期望，并根据申请者的背景创作出有说服力的个人陈述。
+        {role}
         
         # 任务
         
-        请根据提供的PS初稿和改写策略报告，完成一份全面改写的个人陈述。你的改写应该：
-        
-        1. 完全遵循改写策略报告中的建议
-        2. 保留原稿中的核心信息和个人经历，但大幅改进表达方式
-        3. 增强PS与目标院校/专业的匹配度
-        4. 提升整体结构和逻辑连贯性
-        5. 确保语言流畅、专业且有吸引力
-        6. 突出申请者的优势和独特价值
+        {task}
         
         # PS初稿内容
         
@@ -90,7 +99,7 @@ class PSRewriter:
         
         # 输出格式
         
-        请直接输出完整改写后的个人陈述，无需添加任何额外说明、标题或分析。改写后的PS应保持适当长度（通常500-1000词），语言正式但富有个性，段落结构清晰。
+        {output_format}
         """
         
         return prompt
