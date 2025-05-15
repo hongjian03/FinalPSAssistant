@@ -8,3 +8,4 @@ asyncio
 aiohttp
 langchain
 langchain-openai
+mcp-client
