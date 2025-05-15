@@ -96,7 +96,7 @@ class PSRewriter:
         return prompt
     
     def _call_openrouter_api(self, prompt: str) -> str:
-        """调用OpenRouter API使用选定的模型生成改写后的PS"""
+        """调用OpenRouter API使用选定的模型生成重写的PS"""
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -106,11 +106,10 @@ class PSRewriter:
         
         payload = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 4000
+            "messages": [{"role": "user", "content": prompt}]
         }
         
-        with st.spinner(f"使用 {self.model_name} 完成PS改写..."):
+        with st.spinner(f"使用 {self.model_name} 根据分析策略改写PS..."):
             try:
                 response = requests.post(self.api_url, headers=headers, json=payload)
                 
