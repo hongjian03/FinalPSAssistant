@@ -91,29 +91,34 @@ def check_api_keys():
 async def init_serper():
     """Initialize the Serper client asynchronously."""
     try:
+        # 创建进度条
+        progress_text = "正在初始化Serper MCP服务..."
+        my_bar = st.progress(0, text=progress_text)
+        
         # 检查API密钥
+        my_bar.progress(10, text="检查API密钥...")
         api_key_status = check_api_keys()
         if not api_key_status.get("SERPER_API_KEY", False) or not api_key_status.get("SMITHERY_API_KEY", False):
+            my_bar.progress(100, text="缺少必要的API密钥")
             st.error("无法初始化Serper客户端: 缺少必要的API密钥。请确保SERPER_API_KEY和SMITHERY_API_KEY已设置。")
             return False
         
         # 创建新的Serper客户端实例
+        my_bar.progress(20, text="创建Serper MCP客户端实例...")
         serper_client = SerperClient()
         
         # 尝试初始化
-        with st.status("正在初始化Serper MCP客户端...") as status:
-            status.write("正在连接到Serper MCP服务...")
-            result = await serper_client.initialize()
-            
-            if result:
-                status.update(label="Serper MCP客户端初始化成功", state="complete")
-                st.session_state.serper_initialized = True
-                st.session_state.serper_client = serper_client  # 保存客户端实例以便重用
-                return True
-            else:
-                status.update(label="Serper MCP客户端初始化失败", state="error")
-                st.session_state.serper_initialized = False
-                return False
+        my_bar.progress(30, text="开始MCP连接...")
+        # 让SerperClient的initialize方法处理剩余的进度条更新
+        result = await serper_client.initialize()
+        
+        if result:
+            st.session_state.serper_initialized = True
+            st.session_state.serper_client = serper_client  # 保存客户端实例以便重用
+            return True
+        else:
+            st.session_state.serper_initialized = False
+            return False
     except Exception as e:
         st.error(f"初始化Serper客户端时发生异常: {str(e)}")
         st.session_state.serper_initialized = False
@@ -220,10 +225,11 @@ def main():
     
     # 仅在第一次运行时尝试初始化，避免每次页面刷新都重新连接
     if not st.session_state.serper_init_attempted:
-        with st.spinner("正在初始化网络搜索功能..."):
-            import asyncio
-            asyncio.run(init_serper())
-            st.session_state.serper_init_attempted = True
+        st.write("### 初始化MCP服务")
+        st.write("正在初始化网络搜索功能，请稍候...")
+        import asyncio
+        asyncio.run(init_serper())
+        st.session_state.serper_init_attempted = True
     
     with tab1:
         st.title("Applicant Competitiveness Analysis Tool")
