@@ -102,16 +102,16 @@ async def init_serper():
         
         # 尝试初始化
         with st.status("正在初始化Serper MCP客户端...") as status:
-            status.write("正在检查Serper API连接...")
+            status.write("正在连接到Serper MCP服务...")
             result = await serper_client.initialize()
             
             if result:
-                status.update(label="Serper客户端初始化成功", state="complete")
+                status.update(label="Serper MCP客户端初始化成功", state="complete")
                 st.session_state.serper_initialized = True
                 st.session_state.serper_client = serper_client  # 保存客户端实例以便重用
                 return True
             else:
-                status.update(label="Serper客户端初始化失败", state="error")
+                status.update(label="Serper MCP客户端初始化失败", state="error")
                 st.session_state.serper_initialized = False
                 return False
     except Exception as e:
@@ -543,13 +543,13 @@ def main():
         
         # 显示当前状态
         if st.session_state.serper_initialized:
-            st.success("✅ Serper 客户端已成功初始化，可以进行网络搜索")
+            st.success("✅ Serper MCP客户端已成功初始化，可以进行网络搜索")
         else:
-            st.warning("⚠️ Serper 客户端未初始化或初始化失败")
+            st.warning("⚠️ Serper MCP客户端未初始化或初始化失败")
         
         # 初始化Serper客户端按钮
-        if st.button("重新初始化 Serper 客户端"):
-            with st.spinner("正在初始化 Serper 客户端..."):
+        if st.button("重新初始化 Serper MCP客户端"):
+            with st.spinner("正在初始化 Serper MCP客户端..."):
                 import asyncio
                 asyncio.run(init_serper())
                 st.rerun()  # 重新加载页面以更新状态
@@ -578,11 +578,12 @@ def main():
         
         ### 常见问题排查
         
-        如果遇到问题：
+        如果遇到MCP连接问题：
         
-        1. 确保所有必需的 API 密钥都已在 Streamlit secrets 中设置
-        2. 检查控制台是否有错误消息
-        3. 确保您有有效的互联网连接，以便进行 Web 搜索功能
+        1. 确保SERPER_API_KEY和SMITHERY_API_KEY都已正确设置
+        2. 检查MCP URL路径是否正确(/mcp而不是/ws)
+        3. 确保使用的是streamablehttp_client而不是websocket_client
+        4. 如果仍有问题，请查看控制台日志获取详细错误信息
         """)
 
 if __name__ == "__main__":
