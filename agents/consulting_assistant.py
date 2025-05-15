@@ -7,6 +7,9 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from config.prompts import load_prompts
 from agents.serper_client import SerperClient
+import asyncio
+import uuid
+import traceback
 
 class ConsultingAssistant:
     """
@@ -44,6 +47,89 @@ class ConsultingAssistant:
             self.serper_client = SerperClient()
             self.use_shared_client = False
     
+    async def search_ucl_programs_async(self, keywords: List[str]) -> List[Dict[str, str]]:
+        """
+        Asynchronously search for UCL programs using web search.
+        
+        Args:
+            keywords: List of keywords to search for
+            
+        Returns:
+            List of program information dictionaries
+        """
+        # Create container for showing progress
+        search_container = st.container()
+        
+        with search_container:
+            st.subheader("搜索UCL项目")
+            search_status = st.empty()
+            search_status.info(f"正在搜索关键词: {', '.join(keywords)}")
+        
+        try:
+            # 创建搜索查询
+            search_query = f"UCL University College London postgraduate {' '.join(keywords)} program requirements application"
+            
+            # 确保SerperClient已初始化
+            if not self.use_shared_client:
+                search_status.info("初始化搜索客户端...")
+                initialized = await self.serper_client.initialize(main_container=search_container)
+                if not initialized:
+                    search_status.error("无法初始化搜索客户端，将使用默认项目数据")
+                    return self.get_mock_programs()
+            
+            # 执行搜索
+            search_status.info(f"搜索UCL项目: {search_query}")
+            search_results = await self.serper_client.search_web(search_query, main_container=search_container)
+            
+            # 检查搜索结果是否有错误
+            if "error" in search_results:
+                search_status.warning(f"搜索出错: {search_results['error']}")
+                return self.get_mock_programs()
+            
+            # 检查是否有有机结果
+            if "organic" not in search_results or not search_results["organic"]:
+                search_status.warning("未找到相关UCL项目")
+                return self.get_mock_programs()
+            
+            # 处理搜索结果，提取项目信息
+            programs = []
+            for result in search_results["organic"][:5]:  # 使用前5个结果
+                title = result.get("title", "")
+                link = result.get("link", "")
+                snippet = result.get("snippet", "")
+                
+                # 只处理UCL相关的结果
+                if "ucl" in link.lower() or "ucl" in title.lower():
+                    # 从搜索结果中提取项目信息
+                    program_name = title
+                    if " - UCL" in program_name:
+                        program_name = program_name.split(" - UCL")[0]
+                    if " | UCL" in program_name:
+                        program_name = program_name.split(" | UCL")[0]
+                    
+                    # 基本结构
+                    program_info = {
+                        "program_name": program_name,
+                        "program_url": link,
+                        "description": snippet[:200] + "..." if len(snippet) > 200 else snippet,
+                        "department": self._extract_department(title, snippet)
+                    }
+                    
+                    programs.append(program_info)
+            
+            search_status.success(f"找到 {len(programs)} 个相关UCL项目")
+            
+            # 如果没有找到相关项目，则使用默认数据
+            if not programs:
+                search_status.info("未找到符合条件的UCL项目，使用默认数据")
+                return self.get_mock_programs()
+                
+            return programs
+        
+        except Exception as e:
+            search_status.error(f"搜索UCL项目时出错: {str(e)}")
+            return self.get_mock_programs()
+    
     def search_ucl_programs(self, keywords: List[str]) -> List[Dict[str, str]]:
         """
         Search UCL website for programs matching the given keywords.
@@ -54,44 +140,55 @@ class ConsultingAssistant:
         Returns:
             List of program information dictionaries
         """
-        # Use the Serper client to search for programs
-        try:
-            # 如果使用的是共享客户端，则直接运行搜索
-            if self.use_shared_client:
-                # Run the async search method synchronously
-                programs = self.serper_client.run_async(
-                    self.serper_client.search_ucl_programs(keywords)
-                )
-                if programs and not any("error" in p for p in programs):
-                    return programs
-                else:
-                    st.warning("UCL项目搜索未返回有效结果，将使用默认项目数据")
-                    return self.get_mock_programs()
-            else:
-                # 如果使用的是新创建的客户端，需要先初始化
-                st.info("初始化Serper客户端以搜索UCL项目...")
-                initialized = self.serper_client.run_async(
-                    self.serper_client.initialize()
-                )
-                
-                if not initialized:
-                    st.error("无法初始化Serper客户端进行UCL项目搜索。请检查API密钥设置。")
-                    return self.get_mock_programs()
-                
-                # 现在尝试搜索
-                programs = self.serper_client.run_async(
-                    self.serper_client.search_ucl_programs(keywords)
-                )
-                if programs and not any("error" in p for p in programs):
-                    return programs
-                else:
-                    st.warning("UCL项目搜索未返回有效结果，将使用默认项目数据")
-                    return self.get_mock_programs()
-        except Exception as e:
-            st.error(f"Error using Serper for UCL program search: {e}")
-            # Fall back to mock data if search fails
-            st.warning("搜索UCL项目时出错，将使用默认项目数据")
-            return self.get_mock_programs()
+        # Run the async search method synchronously
+        return asyncio.run(self.search_ucl_programs_async(keywords))
+    
+    def _extract_department(self, title: str, description: str) -> str:
+        """
+        Extract department information from search result
+        
+        Args:
+            title: The title of the search result
+            description: The description or snippet
+            
+        Returns:
+            Department name or default value
+        """
+        # Common UCL departments
+        departments = [
+            "Department of Computer Science",
+            "Department of Statistical Science",
+            "Department of Economics",
+            "Department of Mathematics",
+            "Department of Physics",
+            "Department of Chemistry",
+            "Department of Mechanical Engineering",
+            "Department of Electronic Engineering",
+            "Department of Civil Engineering",
+            "UCL School of Management"
+        ]
+        
+        # Look for department name in title and description
+        for dept in departments:
+            if dept.lower() in title.lower() or dept.lower() in description.lower():
+                return dept
+        
+        # Default to faculty level if specific department not found
+        faculties = [
+            "Faculty of Engineering",
+            "Faculty of Mathematical & Physical Sciences",
+            "Faculty of Arts & Humanities",
+            "Faculty of Social & Historical Sciences",
+            "Faculty of Medical Sciences",
+            "Faculty of Life Sciences"
+        ]
+        
+        for faculty in faculties:
+            if faculty.lower() in title.lower() or faculty.lower() in description.lower():
+                return faculty
+        
+        # Default value if no department or faculty found
+        return "UCL Graduate School"
     
     def get_mock_programs(self) -> List[Dict[str, str]]:
         """
