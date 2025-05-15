@@ -207,6 +207,64 @@ class SerperClient:
                 
                 return False
     
+    async def scrape_url(self, url: str, main_container=None) -> str:
+        """
+        抓取指定URL的内容
+        
+        Args:
+            url: 要抓取的URL
+            main_container: 用于显示进度的容器
+            
+        Returns:
+            抓取的内容
+        """
+        # 如果没有提供容器，创建一个新的
+        if main_container is None:
+            main_container = st.container()
+            
+        with main_container:
+            scrape_status = st.empty()
+            scrape_status.info(f"正在抓取网页内容: {url}")
+            
+            try:
+                if not self.search_tool_name or self.search_tool_name != "scrape":
+                    scrape_status.error("未找到有效的抓取工具")
+                    return f"无法抓取 {url} 的内容：未找到有效的抓取工具"
+                
+                # 抓取逻辑
+                try:
+                    async with asyncio.timeout(30):
+                        # 使用streamable_http_client连接到服务器
+                        async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
+                            # 创建MCP会话
+                            async with mcp.ClientSession(read_stream, write_stream) as session:
+                                # 初始化会话
+                                await session.initialize()
+                                
+                                # 准备抓取参数
+                                args = {"url": url}
+                                
+                                # 显示调用信息
+                                scrape_status.info(f"抓取网页: {url}")
+                                
+                                # 调用工具
+                                result = await session.call_tool("scrape", arguments=args)
+                                
+                                # 处理结果
+                                scrape_status.success(f"成功抓取网页内容")
+                                
+                                # 返回结果
+                                if hasattr(result, 'result') and isinstance(result.result, str):
+                                    return result.result
+                                else:
+                                    return "抓取结果格式不正确"
+                except Exception as e:
+                    scrape_status.error(f"抓取过程中出错: {str(e)}")
+                    return f"抓取 {url} 失败: {str(e)}"
+            except Exception as e:
+                scrape_status.error(f"抓取设置出错: {str(e)}")
+                return f"抓取 {url} 失败: {str(e)}"
+                
     async def search_web(self, query: str, main_container=None) -> Dict[str, Any]:
         """
         Perform a web search using the Serper MCP server.
@@ -333,27 +391,38 @@ class SerperClient:
                                         
                                         # 检查结果格式
                                         if hasattr(result, 'result'):
-                                            search_progress.progress(100)
+                                            search_progress.progress(95)
                                             
                                             # 标准搜索结果处理
                                             if isinstance(result.result, dict):
                                                 if "organic" in result.result:
                                                     search_status.success(f"搜索成功，找到 {len(result.result['organic'])} 条结果")
-                                                    # 返回结果
-                                                    return result.result
-                                                # 重新格式化结果
-                                                elif "results" in result.result:
-                                                    formatted_results = {"organic": []}
-                                                    for item in result.result["results"]:
-                                                        formatted_item = {
-                                                            "title": item.get("title", "无标题"),
-                                                            "link": item.get("link", ""),
-                                                            "snippet": item.get("snippet", item.get("description", "无摘要"))
-                                                        }
-                                                        formatted_results["organic"].append(formatted_item)
                                                     
-                                                    search_status.success(f"搜索成功，找到 {len(formatted_results['organic'])} 条结果")
-                                                    return formatted_results
+                                                    # 如果有scrape工具可用，尝试抓取前两个结果的页面内容
+                                                    if "scrape" in self.available_tools and len(result.result['organic']) > 0:
+                                                        search_status.info("正在抓取前两个搜索结果的页面内容...")
+                                                        
+                                                        try:
+                                                            # 最多抓取前两个结果
+                                                            pages_to_scrape = min(2, len(result.result['organic']))
+                                                            for i in range(pages_to_scrape):
+                                                                url = result.result['organic'][i].get('link', '')
+                                                                if url and url.startswith('http'):
+                                                                    search_status.info(f"抓取结果 {i+1}: {url}")
+                                                                    
+                                                                    # 抓取页面内容
+                                                                    content = await self.scrape_url(url, main_container)
+                                                                    
+                                                                    # 将内容添加到搜索结果中
+                                                                    result.result['organic'][i]['page_content'] = content[:15000] if len(content) > 15000 else content
+                                                                    
+                                                            search_status.success(f"已抓取 {pages_to_scrape} 个搜索结果的详细内容")
+                                                        except Exception as e:
+                                                            search_status.warning(f"抓取页面内容时出错: {str(e)}")
+                                                    
+                                                    # 返回结果
+                                                    search_progress.progress(100)
+                                                    return result.result
                                             # 处理scrape工具的结果
                                             elif self.search_tool_name == "scrape" and isinstance(result.result, str):
                                                 search_status.success("网页抓取成功")
@@ -536,6 +605,31 @@ class SerperClient:
                 
                 # 标准化结果格式
                 if "organic" in data:
+                    # 如果有scrape工具可用，尝试抓取前两个结果的页面内容
+                    if "scrape" in self.available_tools and len(data['organic']) > 0:
+                        status_text.info("正在抓取前两个搜索结果的页面内容...")
+                        
+                        try:
+                            # 最多抓取前两个结果
+                            pages_to_scrape = min(2, len(data['organic']))
+                            for i in range(pages_to_scrape):
+                                url = data['organic'][i].get('link', '')
+                                if url and url.startswith('http'):
+                                    status_text.info(f"抓取结果 {i+1}: {url}")
+                                    
+                                    # 创建容器以显示抓取进度
+                                    scrape_container = st.container()
+                                    
+                                    # 抓取页面内容
+                                    content = await self.scrape_url(url, scrape_container)
+                                    
+                                    # 将内容添加到搜索结果中
+                                    data['organic'][i]['page_content'] = content[:15000] if len(content) > 15000 else content
+                                    
+                            status_text.success(f"已抓取 {pages_to_scrape} 个搜索结果的详细内容")
+                        except Exception as e:
+                            status_text.warning(f"抓取页面内容时出错: {str(e)}")
+                    
                     progress_bar.progress(100)
                     status_text.success(f"备用搜索成功，找到 {len(data['organic'])} 条结果")
                     return data
@@ -551,6 +645,31 @@ class SerperClient:
                                 "link": item.get("link", ""),
                                 "snippet": item.get("snippet", "无摘要")
                             })
+                    
+                    # 如果有scrape工具可用，尝试抓取前两个结果的页面内容
+                    if "scrape" in self.available_tools and len(formatted_results['organic']) > 0:
+                        status_text.info("正在抓取前两个搜索结果的页面内容...")
+                        
+                        try:
+                            # 最多抓取前两个结果
+                            pages_to_scrape = min(2, len(formatted_results['organic']))
+                            for i in range(pages_to_scrape):
+                                url = formatted_results['organic'][i].get('link', '')
+                                if url and url.startswith('http'):
+                                    status_text.info(f"抓取结果 {i+1}: {url}")
+                                    
+                                    # 创建容器以显示抓取进度
+                                    scrape_container = st.container()
+                                    
+                                    # 抓取页面内容
+                                    content = await self.scrape_url(url, scrape_container)
+                                    
+                                    # 将内容添加到搜索结果中
+                                    formatted_results['organic'][i]['page_content'] = content[:15000] if len(content) > 15000 else content
+                                    
+                            status_text.success(f"已抓取 {pages_to_scrape} 个搜索结果的详细内容")
+                        except Exception as e:
+                            status_text.warning(f"抓取页面内容时出错: {str(e)}")
                     
                     progress_bar.progress(100)
                     status_text.success(f"备用搜索成功，找到 {len(formatted_results['organic'])} 条结果")
