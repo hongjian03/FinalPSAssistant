@@ -114,7 +114,9 @@ Focus on programs where the student's profile gives them a reasonable chance of 
 [提供重要链接和联系方式]
 
 ## 信息来源
-[列出本报告的信息来源]"""
+[列出本报告的信息来源]
+
+重要说明：如果搜索结果中缺少某些部分的信息（如课程设置、项目特色等），请基于你的知识进行合理补充，并在信息来源部分注明这些是基于模型知识的估计内容。不要留下"待补充"或空白部分，而是尽可能提供有用的内容，同时明确标记这些是估计信息。"""
     },
     
     "supporting_file_analyzer": {
