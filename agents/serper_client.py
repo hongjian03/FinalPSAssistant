@@ -6,13 +6,14 @@ from typing import Dict, Any, List, Optional
 import streamlit as st
 import traceback
 import mcp
-from mcp.client.websocket import websocket_client
+from mcp.client.streamable_http import streamablehttp_client
 import websockets
 
 class SerperClient:
     """
     Client for interacting with the Serper MCP server for web search capabilities.
     This allows the consulting assistant to search for up-to-date information about UCL programs.
+    Using the Smithery-provided HTTP streaming implementation for MCP.
     """
     
     def __init__(self):
@@ -41,12 +42,6 @@ class SerperClient:
         except:
             st.warning("无法获取MCP包版本。请确保已安装正确版本的MCP。")
         
-        # 显示WebSockets版本信息
-        try:
-            st.info(f"WebSockets包版本: {websockets.__version__}")
-        except:
-            st.warning("无法获取WebSockets包版本。请确保已安装正确版本的WebSockets。")
-        
         # Server config
         self.config = {
             "serperApiKey": self.serper_api_key
@@ -59,8 +54,8 @@ class SerperClient:
             st.error(f"配置序列化错误: {str(e)}")
             self.config_b64 = ""
         
-        # Create server URL - 使用最新的正确URL格式
-        self.url = f"wss://server.smithery.ai/@marcopesani/mcp-server-serper/ws?config={self.config_b64}&api_key={self.smithery_api_key}"
+        # Create server URL - 使用HTTP流式API而不是WebSocket
+        self.url = f"https://server.smithery.ai/@marcopesani/mcp-server-serper/mcp?config={self.config_b64}&api_key={self.smithery_api_key}"
         
         # Keep a record of tools
         self.available_tools = []
@@ -73,42 +68,31 @@ class SerperClient:
             return False
             
         # 检查URL格式
-        if not self.url.startswith("wss://"):
+        if not self.url.startswith("https://"):
             st.error(f"错误的URL格式: {self.url[:15]}...")
             return False
             
         try:
             # 添加连接状态指示
-            with st.status("正在连接到Serper API...") as status:
-                status.write("正在准备websocket连接...")
+            with st.status("正在连接到Serper MCP API...") as status:
+                status.write("正在准备HTTP流式连接...")
                 
                 # 显示完整URL信息（不包括配置和API密钥）
                 base_url = self.url.split("?")[0]
                 status.write(f"连接到服务器: {base_url}")
                 
-                # 使用固定的连接参数
-                connection_kwargs = {
-                    "max_size": 10 * 1024 * 1024,  # 10MB 最大消息大小
-                    "ping_interval": None,  # 禁用ping以避免超时问题
-                    "ping_timeout": None,
-                    "close_timeout": 20,  # 增加关闭超时
-                    "max_queue": 32,  # 增加队列大小
-                    "read_limit": 2**18,  # 增加读取限制
-                    "write_limit": 2**18,  # 增加写入限制
-                }
-                
                 try:
                     # 设置更长的超时时间
                     status.write("开始建立连接 (30秒超时)...")
                     async with asyncio.timeout(30):  # 增加超时时间到30秒
-                        # Connect to the server using websocket client
-                        status.write(f"开始WebSocket连接...")
+                        # Connect to the server using streamable HTTP client
+                        status.write(f"开始HTTP流式连接...")
                         
-                        # 尝试创建WebSocket连接
+                        # 尝试创建MCP会话
                         try:
-                            async with websocket_client(self.url, **connection_kwargs) as streams:
-                                status.write("WebSocket连接成功，创建MCP会话...")
-                                async with mcp.ClientSession(*streams) as session:
+                            async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
+                                status.write("HTTP流式连接成功，创建MCP会话...")
+                                async with mcp.ClientSession(read_stream, write_stream) as session:
                                     # Initialize the connection
                                     status.write("初始化MCP会话...")
                                     await session.initialize()
@@ -117,24 +101,22 @@ class SerperClient:
                                     status.write("获取可用工具列表...")
                                     tools_result = await session.list_tools()
                                     self.available_tools = [t.name for t in tools_result.tools]
-                                    st.success(f"成功连接到Serper API。可用工具: {', '.join(self.available_tools)}")
+                                    st.success(f"成功连接到Serper MCP API。可用工具: {', '.join(self.available_tools)}")
                                     return True
-                        except websockets.exceptions.InvalidStatusCode as e:
-                            status.error(f"无效的WebSocket状态码: {e}")
-                            st.error(f"WebSocket连接失败，状态码: {e}")
-                            if "401" in str(e):
-                                st.error("401未授权错误 - API密钥验证失败。请检查SMITHERY_API_KEY是否正确。")
-                            return False
-                        except websockets.exceptions.ConnectionClosed as e:
-                            status.error(f"WebSocket连接被关闭: {e}")
-                            st.error(f"WebSocket连接被过早关闭: {e}")
-                            return False
                         except Exception as e:
-                            status.error(f"WebSocket连接异常: {type(e).__name__}: {e}")
-                            st.error(f"无法建立WebSocket连接: {type(e).__name__}: {e}")
+                            error_type = type(e).__name__
+                            status.error(f"MCP连接异常: {error_type}: {str(e)}")
+                            st.error(f"无法建立MCP连接: {error_type}: {str(e)}")
+                            
+                            # 提供具体错误信息
+                            if "401" in str(e) or "unauthorized" in str(e).lower():
+                                st.error("401未授权错误 - API密钥验证失败。请检查SMITHERY_API_KEY是否正确。")
+                            elif "404" in str(e) or "not found" in str(e).lower():
+                                st.error("404未找到错误 - 无法找到MCP服务器端点。请检查URL是否正确。")
+                            
                             return False
                 except asyncio.TimeoutError:
-                    st.error("连接超时(30秒)。Serper API服务器响应时间过长或不响应。")
+                    st.error("连接超时(30秒)。Serper MCP API服务器响应时间过长或不响应。")
                     return False
         except Exception as e:
             error_message = str(e)
@@ -146,7 +128,7 @@ class SerperClient:
             if "unauthorized" in error_message.lower() or "401" in error_message:
                 st.error("API密钥验证失败。请检查SERPER_API_KEY和SMITHERY_API_KEY是否正确。")
             elif "connect" in error_message.lower() or "connection" in error_message.lower():
-                st.error("无法连接到Serper API服务器。请检查网络连接。")
+                st.error("无法连接到Serper MCP API服务器。请检查网络连接。")
             elif "not found" in error_message.lower() or "404" in error_message:
                 st.error("找不到API端点。请检查URL路径是否正确。")
             return False
@@ -168,24 +150,13 @@ class SerperClient:
                     status.error("搜索查询不能为空")
                     return {"error": "搜索查询不能为空"}
                 
-                # 使用固定的连接参数
-                connection_kwargs = {
-                    "max_size": 10 * 1024 * 1024,  # 10MB 最大消息大小
-                    "ping_interval": None,  # 禁用ping以避免超时问题
-                    "ping_timeout": None,
-                    "close_timeout": 20,  # 增加关闭超时
-                    "max_queue": 32,  # 增加队列大小
-                    "read_limit": 2**18,  # 增加读取限制
-                    "write_limit": 2**18,  # 增加写入限制
-                }
-                
-                # Connect to the server using websocket client
-                status.write("建立WebSocket连接...")
+                # Connect to the server using streamable HTTP client
+                status.write("建立MCP连接...")
                 try:
                     async with asyncio.timeout(30):  # 增加超时时间到30秒
-                        async with websocket_client(self.url, **connection_kwargs) as streams:
+                        async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
                             status.write("创建MCP会话...")
-                            async with mcp.ClientSession(*streams) as session:
+                            async with mcp.ClientSession(read_stream, write_stream) as session:
                                 # Initialize the connection
                                 status.write("初始化会话...")
                                 await session.initialize()
@@ -215,8 +186,8 @@ class SerperClient:
                     status.error("搜索操作超时(30秒)")
                     return {"error": "搜索操作超时(30秒)，服务器响应时间过长"}
                 except Exception as e:
-                    status.error(f"WebSocket连接异常: {type(e).__name__}: {e}")
-                    return {"error": f"WebSocket连接异常: {type(e).__name__}: {e}"}
+                    status.error(f"MCP连接异常: {type(e).__name__}: {e}")
+                    return {"error": f"MCP连接异常: {type(e).__name__}: {e}"}
         except Exception as e:
             error_msg = f"执行Web搜索时出错: {str(e)}"
             traceback_str = traceback.format_exc()
