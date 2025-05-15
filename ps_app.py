@@ -213,23 +213,22 @@ def main():
             with col2:
                 if st.button("生成院校信息报告", disabled=not generate_enabled, key="generate_uni_info", use_container_width=True):
                     if university and major:
-                        with st.spinner(f"使用 {st.session_state.info_collector_model} 收集院校专业信息..."):
-                            # 创建院校信息收集代理
-                            info_collector = PSInfoCollector(model_name=st.session_state.info_collector_model)
-                            
-                            # 收集院校信息
-                            university_info = asyncio.run(info_collector.collect_information(
-                                university=university,
-                                major=major,
-                                custom_requirements="" # 保留参数但传入空字符串
-                            ))
-                            
-                            # 保存院校信息报告
-                            st.session_state.university_info_report = university_info
-                            
-                            # 更新步骤
-                            st.session_state.current_step = 2
-                            st.rerun()
+                        # 创建院校信息收集代理
+                        info_collector = PSInfoCollector(model_name=st.session_state.info_collector_model)
+                        
+                        # 收集院校信息 - 进度条会直接显示在主界面上
+                        university_info = asyncio.run(info_collector.collect_information(
+                            university=university,
+                            major=major,
+                            custom_requirements="" # 保留参数但传入空字符串
+                        ))
+                        
+                        # 保存院校信息报告
+                        st.session_state.university_info_report = university_info
+                        
+                        # 更新步骤
+                        st.session_state.current_step = 2
+                        st.rerun()
         
         # 步骤2：上传支持文件和PS初稿，生成分析报告
         elif st.session_state.current_step == 2:
