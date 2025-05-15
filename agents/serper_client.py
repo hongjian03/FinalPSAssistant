@@ -76,8 +76,9 @@ class SerperClient:
                     
                     return result.result if hasattr(result, 'result') else {}
         except Exception as e:
-            st.error(f"Error performing web search: {e}")
-            return {"error": str(e)}
+            error_msg = f"执行Web搜索时出错: {str(e)}"
+            st.error(error_msg)
+            return {"error": error_msg}
     
     async def search_ucl_programs(self, keywords: List[str]) -> List[Dict[str, str]]:
         """
@@ -89,8 +90,6 @@ class SerperClient:
         Returns:
             List of program information dictionaries
         """
-        programs = []
-        
         try:
             # Construct search query
             search_query = f"UCL University College London postgraduate programs {' '.join(keywords)}"
@@ -98,32 +97,29 @@ class SerperClient:
             # Perform search
             search_results = await self.search_web(search_query)
             
-            # Process results (in a real implementation, you would parse the search results)
-            # For now, we'll return mock data similar to the original implementation
+            # Check for errors
+            if "error" in search_results:
+                return [{"error": search_results["error"]}]
             
-            # Mock program data - in production, parse the actual search results
-            programs = [
-                {
-                    "department": "Department of Computer Science",
-                    "program_name": "MSc Computer Science",
-                    "application_open": "October 2023",
-                    "application_close": "July 31, 2024",
-                    "program_url": "https://www.ucl.ac.uk/prospective-students/graduate/taught-degrees/computer-science-msc"
-                },
-                {
-                    "department": "Department of Computer Science",
-                    "program_name": "MSc Data Science and Machine Learning",
-                    "application_open": "October 2023",
-                    "application_close": "March 29, 2024",
-                    "program_url": "https://www.ucl.ac.uk/prospective-students/graduate/taught-degrees/data-science-machine-learning-msc"
-                },
-                # Add more mock programs based on keywords
-            ]
+            # Process actual search results
+            programs = []
             
+            # Extract relevant information from search results
+            if "organic" in search_results:
+                for result in search_results["organic"][:5]:
+                    programs.append({
+                        "title": result.get("title", "无标题"),
+                        "url": result.get("link", "无链接"),
+                        "description": result.get("snippet", "无描述")
+                    })
+            
+            # Return real search results
             return programs
+            
         except Exception as e:
-            st.error(f"Error searching UCL programs: {e}")
-            return []
+            error_msg = f"搜索UCL项目时出错: {str(e)}"
+            st.error(error_msg)
+            return [{"error": error_msg}]
     
     def run_async(self, coroutine):
         """Helper method to run async methods synchronously."""
