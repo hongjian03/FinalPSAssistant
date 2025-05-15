@@ -7,139 +7,119 @@ import streamlit as st
 import traceback
 import mcp
 from mcp.client.streamable_http import streamablehttp_client
-import websockets
 
 class SerperClient:
     """
     Client for interacting with the Serper MCP server for web search capabilities.
-    This allows the consulting assistant to search for up-to-date information about UCL programs.
+    This allows agents to search for up-to-date information from the web.
     Using the Smithery-provided HTTP streaming implementation for MCP.
     """
     
     def __init__(self):
         """Initialize the Serper MCP client with configuration from Streamlit secrets."""
-        # Get API keys from Streamlit secrets - 确保精确匹配密钥名称
+        # Get API keys from Streamlit secrets
         self.serper_api_key = st.secrets.get("SERPER_API_KEY", "").strip()
         self.smithery_api_key = st.secrets.get("SMITHERY_API_KEY", "").strip()
-        
-        # 添加API密钥检查调试信息
-        if not self.serper_api_key:
-            st.error("SERPER_API_KEY 未设置或为空。请在 .streamlit/secrets.toml 中正确配置此密钥。")
-        
-        if not self.smithery_api_key:
-            st.error("SMITHERY_API_KEY 未设置或为空。请在 .streamlit/secrets.toml 中正确配置此密钥。")
-        
-        # 显示密钥前几位字符（安全地显示部分密钥以确认有值）
-        if len(self.serper_api_key) > 4:
-            st.info(f"SERPER_API_KEY 已设置 (开头为: {self.serper_api_key[:4]}...)")
-        
-        if len(self.smithery_api_key) > 4:
-            st.info(f"SMITHERY_API_KEY 已设置 (开头为: {self.smithery_api_key[:4]}...)")
-            
-        # 显示MCP版本信息
-        try:
-            st.info(f"MCP包版本: {mcp.__version__}")
-        except Exception:
-            st.warning("无法获取MCP包版本。请确保已安装正确版本的MCP。")
         
         # Server config
         self.config = {
             "serperApiKey": self.serper_api_key
         }
         
-        # Base64 encode the config - 添加错误处理
+        # Base64 encode the config
         try:
             self.config_b64 = base64.b64encode(json.dumps(self.config).encode()).decode()
         except Exception as e:
-            st.error(f"配置序列化错误: {str(e)}")
             self.config_b64 = ""
         
-        # Create server URL - 使用HTTP流式API而不是WebSocket
+        # Create server URL with HTTP streaming API
         self.url = f"https://server.smithery.ai/@marcopesani/mcp-server-serper/mcp?config={self.config_b64}&api_key={self.smithery_api_key}"
         
         # Keep a record of tools
         self.available_tools = []
     
-    async def initialize(self):
+    async def initialize(self, main_container=None):
         """Initialize the connection to the MCP server and get available tools."""
-        # 检查API密钥是否设置
+        # Create a container for the progress display if not provided
+        if main_container is None:
+            main_container = st.container()
+        
+        # Check API keys
         if not self.serper_api_key or not self.smithery_api_key:
-            st.error("无法初始化: SERPER_API_KEY 或 SMITHERY_API_KEY 未设置。")
+            with main_container:
+                st.error("无法初始化: SERPER_API_KEY 或 SMITHERY_API_KEY 未设置。")
             return False
             
-        # 检查URL格式
+        # Check URL format
         if not self.url.startswith("https://"):
-            st.error(f"错误的URL格式: {self.url[:15]}...")
+            with main_container:
+                st.error(f"错误的URL格式: {self.url[:15]}...")
             return False
             
         try:
-            # 创建一个专门的容器用于显示连接进度
-            connection_container = st.container()
-            with connection_container:
+            with main_container:
                 st.subheader("MCP连接进度")
                 
-                # 创建进度条和状态显示
+                # Create progress bar and status display
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 status_text.info("开始初始化Serper MCP服务连接")
                 
-                # 显示基本URL信息（不包括配置和API密钥）
+                # Display basic URL info
                 base_url = self.url.split("?")[0]
                 st.caption(f"连接到服务器: {base_url}")
                 
                 try:
-                    # 设置较长的超时时间
+                    # Set longer timeout
                     status_text.info("准备建立连接 (30秒超时)...")
                     progress_bar.progress(10)
-                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                    await asyncio.sleep(0.3)
                     
-                    async with asyncio.timeout(30):  # 增加超时时间到30秒
-                        # Connect to the server using streamable HTTP client
+                    async with asyncio.timeout(30):
+                        # Connect using streamable HTTP client
                         status_text.info("开始HTTP流式连接...")
                         progress_bar.progress(30)
-                        await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                        await asyncio.sleep(0.3)
                         
-                        # 尝试创建MCP会话
                         try:
                             async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
                                 status_text.info("HTTP流式连接成功，创建MCP会话...")
                                 progress_bar.progress(50)
-                                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                await asyncio.sleep(0.3)
                                 
                                 async with mcp.ClientSession(read_stream, write_stream) as session:
                                     # Initialize the connection
                                     status_text.info("初始化MCP会话...")
                                     progress_bar.progress(70)
-                                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                    await asyncio.sleep(0.3)
                                     
-                                    # 初始化连接
+                                    # Initialize connection
                                     await session.initialize()
                                     
                                     # List available tools
                                     status_text.info("获取可用工具列表...")
                                     progress_bar.progress(85)
-                                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                    await asyncio.sleep(0.3)
                                     
                                     tools_result = await session.list_tools()
                                     self.available_tools = [t.name for t in tools_result.tools]
                                     
-                                    # 连接成功，完成进度条
+                                    # Connection successful
                                     progress_bar.progress(100)
                                     status_text.success("MCP连接成功！")
-                                    st.success(f"成功连接到Serper MCP API。可用工具: {', '.join(self.available_tools)}")
                                     return True
                         except Exception as e:
                             error_type = type(e).__name__
                             progress_bar.progress(100)
                             status_text.error(f"MCP连接失败: {error_type}")
                             
-                            st.error(f"MCP连接异常: {error_type}: {str(e)}")
+                            st.error(f"MCP连接失败: {str(e)}")
                             
-                            # 提供具体错误信息
+                            # Provide specific error information
                             if "401" in str(e) or "unauthorized" in str(e).lower():
-                                st.error("401未授权错误 - API密钥验证失败。请检查SMITHERY_API_KEY是否正确。")
+                                st.error("API密钥验证失败。请检查SMITHERY_API_KEY是否正确。")
                             elif "404" in str(e) or "not found" in str(e).lower():
-                                st.error("404未找到错误 - 无法找到MCP服务器端点。请检查URL是否正确。")
+                                st.error("无法找到MCP服务器端点。请检查URL是否正确。")
                             
                             return False
                 except asyncio.TimeoutError:
@@ -150,41 +130,35 @@ class SerperClient:
                     return False
         except Exception as e:
             error_message = str(e)
-            traceback_str = traceback.format_exc()
-            st.error(f"初始化Serper MCP客户端时出错: {error_message}")
-            st.error(f"错误堆栈: {traceback_str}")
-            
-            # 提供更具体的错误信息
-            if "unauthorized" in error_message.lower() or "401" in error_message:
-                st.error("API密钥验证失败。请检查SERPER_API_KEY和SMITHERY_API_KEY是否正确。")
-            elif "connect" in error_message.lower() or "connection" in error_message.lower():
-                st.error("无法连接到Serper MCP API服务器。请检查网络连接。")
-            elif "not found" in error_message.lower() or "404" in error_message:
-                st.error("找不到API端点。请检查URL路径是否正确。")
+            with main_container:
+                st.error(f"初始化MCP客户端时出错: {error_message}")
             return False
     
-    async def search_web(self, query: str) -> Dict[str, Any]:
+    async def search_web(self, query: str, main_container=None) -> Dict[str, Any]:
         """
         Perform a web search using the Serper MCP server.
         
         Args:
             query: The search query
+            main_container: Container to display progress in
             
         Returns:
             Dictionary containing search results
         """
+        # Create a container for the progress display if not provided
+        if main_container is None:
+            main_container = st.container()
+            
         try:
-            # 创建专用容器显示搜索进度
-            search_container = st.container()
-            with search_container:
+            with main_container:
                 st.subheader(f"执行搜索: {query}")
                 
-                # 创建进度条和状态显示
+                # Create progress bar and status display
                 search_progress = st.progress(0)
                 search_status = st.empty()
                 search_status.info("准备搜索...")
                 
-                # 防止查询为空
+                # Prevent empty query
                 if not query or len(query.strip()) == 0:
                     search_progress.progress(100)
                     search_status.error("搜索查询不能为空")
@@ -193,27 +167,27 @@ class SerperClient:
                 # Connect to the server using streamable HTTP client
                 search_progress.progress(20)
                 search_status.info("建立MCP连接...")
-                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                await asyncio.sleep(0.3)
                 
                 try:
-                    async with asyncio.timeout(30):  # 增加超时时间到30秒
+                    async with asyncio.timeout(30):
                         async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
                             search_progress.progress(40)
                             search_status.info("创建MCP会话...")
-                            await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                            await asyncio.sleep(0.3)
                             
                             async with mcp.ClientSession(read_stream, write_stream) as session:
                                 # Initialize the connection
                                 search_progress.progress(50)
                                 search_status.info("初始化会话...")
-                                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                await asyncio.sleep(0.3)
                                 
                                 await session.initialize()
                                 
                                 # Call the web search tool
                                 search_progress.progress(70)
                                 search_status.info(f"执行搜索: {query}")
-                                await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                await asyncio.sleep(0.3)
                                 
                                 try:
                                     result = await session.call_tool("web-search", arguments={
@@ -223,7 +197,7 @@ class SerperClient:
                                     
                                     search_progress.progress(90)
                                     search_status.info("处理搜索结果...")
-                                    await asyncio.sleep(0.3)  # 短暂延迟以便进度条更新
+                                    await asyncio.sleep(0.3)
                                     
                                     if hasattr(result, 'result'):
                                         search_progress.progress(100)
@@ -250,51 +224,9 @@ class SerperClient:
                     return {"error": f"MCP连接异常: {type(e).__name__}: {e}"}
         except Exception as e:
             error_msg = f"执行Web搜索时出错: {str(e)}"
-            traceback_str = traceback.format_exc()
-            st.error(error_msg)
-            st.error(f"错误堆栈: {traceback_str}")
+            with main_container:
+                st.error(error_msg)
             return {"error": error_msg}
-    
-    async def search_ucl_programs(self, keywords: List[str]) -> List[Dict[str, str]]:
-        """
-        Search for UCL programs using the web search tool.
-        
-        Args:
-            keywords: List of keywords to search for
-            
-        Returns:
-            List of program information dictionaries
-        """
-        try:
-            # Construct search query
-            search_query = f"UCL University College London postgraduate programs {' '.join(keywords)}"
-            
-            # Perform search
-            search_results = await self.search_web(search_query)
-            
-            # Check for errors
-            if "error" in search_results:
-                return [{"error": search_results["error"]}]
-            
-            # Process actual search results
-            programs = []
-            
-            # Extract relevant information from search results
-            if "organic" in search_results:
-                for result in search_results["organic"][:5]:
-                    programs.append({
-                        "title": result.get("title", "无标题"),
-                        "url": result.get("link", "无链接"),
-                        "description": result.get("snippet", "无描述")
-                    })
-            
-            # Return real search results
-            return programs
-            
-        except Exception as e:
-            error_msg = f"搜索UCL项目时出错: {str(e)}"
-            st.error(error_msg)
-            return [{"error": error_msg}]
     
     def run_async(self, coroutine):
         """Helper method to run async methods synchronously."""
