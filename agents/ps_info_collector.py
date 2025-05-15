@@ -44,24 +44,34 @@ class PSInfoCollector:
             格式化的院校信息收集报告
         """
         try:
-            # 创建主容器用于显示所有内容
+            # === 第1步：创建明确的UI布局结构 ===
+            # 创建一个完全独立的主容器用于整个流程
             main_container = st.container()
             
-            # 创建初始化容器
             with main_container:
-                st.subheader("初始化网络搜索功能")
-                
-                # 创建专门的容器来显示初始化进度
-                init_container = st.container()
-                with init_container:
-                    st.info("正在初始化MCP连接以执行Web搜索...")
+                # 1.1 首先创建所有可能需要使用的区域容器，避免布局混乱
+                search_setup_container = st.container()  # 搜索初始化区域
+                search_results_container = st.container()  # 搜索结果显示区域
+                report_container = st.container()  # 最终报告生成区域
             
-            # 尝试初始化Serper客户端，传递容器确保UI在主区域显示
-            initialized = await self.serper_client.initialize(main_container=init_container)
+            # === 第2步：初始化MCP客户端（在第一个区域） ===
+            with search_setup_container:
+                st.subheader("初始化搜索功能")
+                
+                # 创建专门的进度容器用于初始化进度条
+                init_progress_container = st.container()
+                
+                with init_progress_container:
+                    init_status = st.empty()
+                    init_status.info("正在初始化MCP搜索服务...")
+            
+            # 尝试初始化Serper客户端，确保进度显示在search_setup_container中
+            initialized = await self.serper_client.initialize(main_container=search_setup_container)
+            
             if not initialized:
-                with main_container:
-                    st.error("无法初始化Serper客户端进行网络搜索。将使用基础LLM知识生成信息。")
-                return self._generate_info_with_llm(university, major, custom_requirements, main_container)
+                with search_setup_container:
+                    st.error("无法初始化搜索服务。将使用基础知识生成信息。")
+                return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
             
             # 检查输入参数
             if not university or not university.strip():
@@ -70,43 +80,46 @@ class PSInfoCollector:
             if not major or not major.strip():
                 return "**错误：未提供目标专业。请输入一个有效的专业名称。**"
             
+            # === 第3步：执行搜索（在第一个区域继续） ===
             # 构建搜索查询
             search_query = f"{university} {major} postgraduate program requirements application"
             
-            # 执行Web搜索
-            search_container = st.container()
-            search_results = await self.serper_client.search_web(search_query, main_container=search_container)
+            with search_setup_container:
+                st.subheader("执行网络搜索")
+                st.info(f"正在搜索: {search_query}")
+            
+            # 执行Web搜索，确保进度显示在search_setup_container中
+            search_results = await self.serper_client.search_web(search_query, main_container=search_setup_container)
             
             # 检查搜索结果是否包含错误
             if "error" in search_results:
                 error_msg = search_results["error"]
-                with main_container:
+                with search_setup_container:
                     st.error(f"执行Web搜索时出错: {error_msg}")
-                    st.warning("搜索失败，将使用LLM生成院校信息。请注意，此信息可能不是最新的。")
-                return self._generate_info_with_llm(university, major, custom_requirements, main_container)
+                    st.warning("搜索失败，将使用基础知识生成院校信息。请注意，此信息可能不是最新的。")
+                return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
             
             # 检查搜索结果是否有效
             if not search_results or "organic" not in search_results or not search_results["organic"]:
-                with main_container:
-                    st.warning(f"未找到关于{university}的{major}专业的搜索结果。将使用LLM生成基本信息。")
-                return self._generate_info_with_llm(university, major, custom_requirements, main_container)
+                with search_setup_container:
+                    st.warning(f"未找到关于{university}的{major}专业的搜索结果。将使用基础知识生成信息。")
+                return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
             
-            # 检查搜索结果并显示
+            # === 第4步：显示搜索结果（在第二个区域） ===
+            # 显示搜索结果摘要
             if len(search_results.get('organic', [])) > 0:
-                with main_container:
-                    result_container = st.container()
-                    with result_container:
-                        st.subheader("搜索结果摘要")
-                        st.caption(f"找到 {len(search_results.get('organic', []))} 条相关结果")
-                        for i, result in enumerate(search_results.get('organic', [])[:3], 1):
-                            st.markdown(f"**{i}. {result.get('title', '无标题')}**")
-                            st.caption(f"来源: {result.get('link', '无链接')}")
+                with search_results_container:
+                    st.subheader("搜索结果摘要")
+                    st.caption(f"找到 {len(search_results.get('organic', []))} 条相关结果")
+                    for i, result in enumerate(search_results.get('organic', [])[:3], 1):
+                        st.markdown(f"**{i}. {result.get('title', '无标题')}**")
+                        st.caption(f"来源: {result.get('link', '无链接')}")
             
+            # === 第5步：生成报告（在第三个区域） ===
             # 根据搜索结果生成提示
             prompt = self._build_info_prompt(university, major, search_results, custom_requirements)
             
-            # 显示生成信息
-            report_container = st.container()
+            # 在最后的区域显示最终报告生成进度
             with report_container:
                 st.subheader("生成院校信息报告")
                 report_progress = st.progress(0)
@@ -125,14 +138,14 @@ class PSInfoCollector:
                     report_status.success("院校信息报告生成成功")
                 else:
                     report_status.error("院校信息报告生成失败")
-                
+            
             return report
         
         except Exception as e:
             error_msg = f"**错误：收集院校信息时出错 - {str(e)}**"
             with st.container():
                 st.error(error_msg)
-                st.warning("发生错误，将使用LLM生成院校信息。请注意，此信息可能不是最新的。")
+                st.warning("发生错误，将使用基础知识生成院校信息。请注意，此信息可能不是最新的。")
             return self._generate_info_with_llm(university, major, custom_requirements)
             
     def _generate_info_with_llm(self, university: str, major: str, custom_requirements: str = "", main_container=None) -> str:
