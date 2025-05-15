@@ -162,7 +162,7 @@ class SupportingFileAnalyzer:
         return prompt
     
     def _call_openrouter_api(self, prompt: str) -> str:
-        """调用OpenRouter API使用选定的模型生成报告"""
+        """调用OpenRouter API使用选定的模型生成分析结果"""
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -172,8 +172,7 @@ class SupportingFileAnalyzer:
         
         payload = {
             "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 2000
+            "messages": [{"role": "user", "content": prompt}]
         }
         
         with st.spinner(f"使用 {self.model_name} 分析支持文件..."):
