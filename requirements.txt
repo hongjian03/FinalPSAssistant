@@ -8,6 +8,7 @@ asyncio
 aiohttp
 langchain
 langchain-openai
-mcp-client
-mcp
+langsmith
+mcp-client>=0.6.3
+mcp>=0.6.3
 websockets
