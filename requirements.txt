@@ -1,0 +1,8 @@
+streamlit>=1.30.0
+pymupdf>=1.23.0
+python-docx>=1.0.0
+Pillow>=10.0.0
+markitdown>=1.0.0
+requests>=2.31.0
+asyncio>=3.4.3
+aiohttp>=3.9.0 
