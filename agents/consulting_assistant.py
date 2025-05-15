@@ -62,8 +62,12 @@ class ConsultingAssistant:
         
         with search_container:
             st.subheader("搜索UCL项目")
-            search_status = st.empty()
-            search_status.info(f"正在搜索关键词: {', '.join(keywords)}")
+            
+            # 创建专门的进度显示容器，确保进度条在主UI中
+            progress_container = st.container()
+            with progress_container:
+                search_status = st.empty()
+                search_status.info(f"正在搜索关键词: {', '.join(keywords)}")
         
         try:
             # 创建搜索查询
@@ -71,14 +75,19 @@ class ConsultingAssistant:
             
             # 确保SerperClient已初始化
             if not self.use_shared_client:
-                search_status.info("初始化搜索客户端...")
+                with progress_container:
+                    search_status.info("正在初始化搜索客户端...")
+                
+                # 使用search_container作为主容器传递给SerperClient
                 initialized = await self.serper_client.initialize(main_container=search_container)
                 if not initialized:
-                    search_status.error("无法初始化搜索客户端，将使用默认项目数据")
+                    with progress_container:
+                        search_status.error("无法初始化搜索客户端，将使用默认项目数据")
                     return self.get_mock_programs()
             
             # 执行搜索
-            search_status.info(f"搜索UCL项目: {search_query}")
+            with progress_container:
+                search_status.info(f"搜索UCL项目: {search_query}")
             search_results = await self.serper_client.search_web(search_query, main_container=search_container)
             
             # 检查搜索结果是否有错误
