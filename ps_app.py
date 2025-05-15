@@ -48,20 +48,31 @@ if "ps_file" not in st.session_state:
 if "current_step" not in st.session_state:
     st.session_state.current_step = 1
 if "info_collector_model" not in st.session_state:
-    st.session_state.info_collector_model = "anthropic/claude-3-7-sonnet"
+    st.session_state.info_collector_model = "google/gemini-2.0-flash-001"
 if "supporting_analyzer_model" not in st.session_state:
-    st.session_state.supporting_analyzer_model = "anthropic/claude-3-7-sonnet"
+    st.session_state.supporting_analyzer_model = "qwen/qwen-max"
 if "ps_analyzer_model" not in st.session_state:
-    st.session_state.ps_analyzer_model = "anthropic/claude-3-7-sonnet"
+    st.session_state.ps_analyzer_model = "qwen/qwen-max"
 if "ps_rewriter_model" not in st.session_state:
     st.session_state.ps_rewriter_model = "anthropic/claude-3-7-sonnet"
 
-# 支持的模型列表
-SUPPORTED_MODELS = [
+# 支持的模型列表（每个Agent的可选模型）
+INFO_COLLECTOR_MODELS = [
+    "google/gemini-2.0-flash-001",
+    "deepseek/deepseek-chat-v3-0324:free"
+]
+
+SUPPORTING_ANALYZER_MODELS = [
+    "qwen/qwen-max"
+]
+
+PS_ANALYZER_MODELS = [
+    "qwen/qwen-max",
+    "deepseek/deepseek-chat-v3-0324"
+]
+
+PS_REWRITER_MODELS = [
     "anthropic/claude-3-7-sonnet",
-    "anthropic/claude-3-5-sonnet",
-    "openai/gpt-4-turbo",
-    "openai/gpt-4-1106-preview",
     "qwen/qwen-max"
 ]
 
@@ -405,8 +416,8 @@ def main():
             # 院校信息收集模型选择
             info_collector_model = st.selectbox(
                 "选择院校信息收集模型",
-                SUPPORTED_MODELS,
-                index=SUPPORTED_MODELS.index(st.session_state.info_collector_model) if st.session_state.info_collector_model in SUPPORTED_MODELS else 0,
+                INFO_COLLECTOR_MODELS,
+                index=INFO_COLLECTOR_MODELS.index(st.session_state.info_collector_model) if st.session_state.info_collector_model in INFO_COLLECTOR_MODELS else 0,
                 key="info_collector_model_select"
             )
             st.session_state.info_collector_model = info_collector_model
@@ -414,8 +425,8 @@ def main():
             # PS分析模型选择
             ps_analyzer_model = st.selectbox(
                 "选择PS分析模型",
-                SUPPORTED_MODELS,
-                index=SUPPORTED_MODELS.index(st.session_state.ps_analyzer_model) if st.session_state.ps_analyzer_model in SUPPORTED_MODELS else 0,
+                PS_ANALYZER_MODELS,
+                index=PS_ANALYZER_MODELS.index(st.session_state.ps_analyzer_model) if st.session_state.ps_analyzer_model in PS_ANALYZER_MODELS else 0,
                 key="ps_analyzer_model_select"
             )
             st.session_state.ps_analyzer_model = ps_analyzer_model
@@ -424,8 +435,8 @@ def main():
             # 支持文件分析模型选择
             supporting_analyzer_model = st.selectbox(
                 "选择支持文件分析模型",
-                SUPPORTED_MODELS,
-                index=SUPPORTED_MODELS.index(st.session_state.supporting_analyzer_model) if st.session_state.supporting_analyzer_model in SUPPORTED_MODELS else 0,
+                SUPPORTING_ANALYZER_MODELS,
+                index=SUPPORTING_ANALYZER_MODELS.index(st.session_state.supporting_analyzer_model) if st.session_state.supporting_analyzer_model in SUPPORTING_ANALYZER_MODELS else 0,
                 key="supporting_analyzer_model_select"
             )
             st.session_state.supporting_analyzer_model = supporting_analyzer_model
@@ -433,8 +444,8 @@ def main():
             # PS改写模型选择
             ps_rewriter_model = st.selectbox(
                 "选择PS改写模型",
-                SUPPORTED_MODELS,
-                index=SUPPORTED_MODELS.index(st.session_state.ps_rewriter_model) if st.session_state.ps_rewriter_model in SUPPORTED_MODELS else 0,
+                PS_REWRITER_MODELS,
+                index=PS_REWRITER_MODELS.index(st.session_state.ps_rewriter_model) if st.session_state.ps_rewriter_model in PS_REWRITER_MODELS else 0,
                 key="ps_rewriter_model_select"
             )
             st.session_state.ps_rewriter_model = ps_rewriter_model
