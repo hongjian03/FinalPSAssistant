@@ -91,36 +91,60 @@ def check_api_keys():
 async def init_serper():
     """Initialize the Serper client asynchronously."""
     try:
-        # 创建进度条
-        progress_text = "正在初始化Serper MCP服务..."
-        my_bar = st.progress(0, text=progress_text)
+        # 创建一个主容器用于显示进度和状态，确保显示在主UI而不是侧边栏
+        main_container = st.container()
         
-        # 检查API密钥
-        my_bar.progress(10, text="检查API密钥...")
-        api_key_status = check_api_keys()
-        if not api_key_status.get("SERPER_API_KEY", False) or not api_key_status.get("SMITHERY_API_KEY", False):
-            my_bar.progress(100, text="缺少必要的API密钥")
-            st.error("无法初始化Serper客户端: 缺少必要的API密钥。请确保SERPER_API_KEY和SMITHERY_API_KEY已设置。")
-            return False
+        with main_container:
+            # 创建进度条标题
+            st.subheader("MCP服务初始化")
+            
+            # 创建专门的进度展示区域，确保进度条靠左对齐
+            progress_container = st.container()
+            
+            with progress_container:
+                # 创建进度条和状态文本
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                status_text.info("正在初始化Serper MCP服务...")
         
-        # 创建新的Serper客户端实例
-        my_bar.progress(20, text="创建Serper MCP客户端实例...")
-        serper_client = SerperClient()
-        
-        # 尝试初始化
-        my_bar.progress(30, text="开始MCP连接...")
-        # 让SerperClient的initialize方法处理剩余的进度条更新
-        result = await serper_client.initialize()
-        
-        if result:
-            st.session_state.serper_initialized = True
-            st.session_state.serper_client = serper_client  # 保存客户端实例以便重用
-            return True
-        else:
-            st.session_state.serper_initialized = False
-            return False
+            # 检查API密钥
+            with progress_container:
+                progress_bar.progress(10)
+                status_text.info("检查API密钥...")
+                
+            api_key_status = check_api_keys()
+            if not api_key_status.get("SERPER_API_KEY", False) or not api_key_status.get("SMITHERY_API_KEY", False):
+                with progress_container:
+                    progress_bar.progress(100)
+                    status_text.error("缺少必要的API密钥")
+                st.error("无法初始化Serper客户端: 缺少必要的API密钥。请确保SERPER_API_KEY和SMITHERY_API_KEY已设置。")
+                return False
+            
+            # 创建新的Serper客户端实例
+            with progress_container:
+                progress_bar.progress(20)
+                status_text.info("创建Serper MCP客户端实例...")
+                
+            serper_client = SerperClient()
+            
+            # 尝试初始化，传递主容器以便在其中显示进度
+            with progress_container:
+                progress_bar.progress(30) 
+                status_text.info("开始MCP连接...")
+                
+            # 让SerperClient的initialize方法处理剩余的进度条更新，传递主容器
+            result = await serper_client.initialize(main_container)
+            
+            if result:
+                st.session_state.serper_initialized = True
+                st.session_state.serper_client = serper_client  # 保存客户端实例以便重用
+                return True
+            else:
+                st.session_state.serper_initialized = False
+                return False
     except Exception as e:
-        st.error(f"初始化Serper客户端时发生异常: {str(e)}")
+        with main_container:
+            st.error(f"初始化Serper客户端时发生异常: {str(e)}")
         st.session_state.serper_initialized = False
         return False
 
@@ -225,8 +249,12 @@ def main():
     
     # 仅在第一次运行时尝试初始化，避免每次页面刷新都重新连接
     if not st.session_state.serper_init_attempted:
-        st.write("### 初始化MCP服务")
-        st.write("正在初始化网络搜索功能，请稍候...")
+        # 创建主容器用于初始化，确保显示在左侧主UI
+        init_container = st.container()
+        with init_container:
+            st.write("### 初始化网络搜索功能")
+            st.write("正在连接到MCP服务，请稍候...")
+            
         import asyncio
         asyncio.run(init_serper())
         st.session_state.serper_init_attempted = True
