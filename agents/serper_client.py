@@ -37,6 +37,8 @@ class SerperClient:
         
         # Keep a record of tools
         self.available_tools = []
+        # The correct search tool name (will be determined in initialize)
+        self.search_tool_name = None
     
     async def initialize(self, main_container=None):
         """Initialize the connection to the MCP server and get available tools."""
@@ -104,10 +106,34 @@ class SerperClient:
                                     tools_result = await session.list_tools()
                                     self.available_tools = [t.name for t in tools_result.tools]
                                     
+                                    # Determine the correct search tool name
+                                    search_tool_candidates = [
+                                        "search", 
+                                        "serper-search", 
+                                        "web-search",
+                                        "google-search",
+                                        "serper"
+                                    ]
+                                    
+                                    for tool_name in search_tool_candidates:
+                                        if tool_name in self.available_tools:
+                                            self.search_tool_name = tool_name
+                                            break
+                                    
                                     # Connection successful
                                     progress_bar.progress(100)
                                     status_text.success("MCP连接成功！")
-                                    return True
+                                    
+                                    # Display available tools and selected search tool
+                                    tools_info = f"可用工具: {', '.join(self.available_tools)}"
+                                    if self.search_tool_name:
+                                        tools_info += f"\n已选择搜索工具: {self.search_tool_name}"
+                                    else:
+                                        tools_info += "\n警告: 未找到可用的搜索工具!"
+                                    
+                                    st.info(tools_info)
+                                    
+                                    return self.search_tool_name is not None
                         except Exception as e:
                             error_type = type(e).__name__
                             progress_bar.progress(100)
@@ -158,6 +184,12 @@ class SerperClient:
                 search_status = st.empty()
                 search_status.info("准备搜索...")
                 
+                # Check if we have a valid search tool
+                if not self.search_tool_name:
+                    search_progress.progress(100)
+                    search_status.error("未找到有效的搜索工具")
+                    return {"error": "未找到有效的搜索工具，请确保MCP服务器提供了搜索功能"}
+                
                 # Prevent empty query
                 if not query or len(query.strip()) == 0:
                     search_progress.progress(100)
@@ -190,7 +222,8 @@ class SerperClient:
                                 await asyncio.sleep(0.3)
                                 
                                 try:
-                                    result = await session.call_tool("web-search", arguments={
+                                    # Use the dynamically determined search tool name
+                                    result = await session.call_tool(self.search_tool_name, arguments={
                                         "query": query,
                                         "numResults": 5
                                     })
@@ -212,8 +245,8 @@ class SerperClient:
                                         return {"error": "搜索结果格式不正确，缺少result属性"}
                                 except Exception as e:
                                     search_progress.progress(100)
-                                    search_status.error(f"调用web-search工具时出错: {str(e)}")
-                                    return {"error": f"调用web-search工具时出错: {str(e)}"}
+                                    search_status.error(f"调用{self.search_tool_name}工具时出错: {str(e)}")
+                                    return {"error": f"调用{self.search_tool_name}工具时出错: {str(e)}"}
                 except asyncio.TimeoutError:
                     search_progress.progress(100)
                     search_status.error("搜索操作超时(30秒)")
