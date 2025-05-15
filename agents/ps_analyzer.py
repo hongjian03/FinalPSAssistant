@@ -7,6 +7,7 @@ import json
 import fitz  # PyMuPDF
 import docx
 import markitdown
+from config.prompts import load_prompts
 
 class PSAnalyzer:
     """
@@ -121,22 +122,31 @@ class PSAnalyzer:
         ```
         """
         
+        # 从配置文件加载提示词
+        import os
+        import sys
+        import json
+        
+        # 添加父目录到路径以便正确导入
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        from config.prompts import load_prompts
+        
+        prompts = load_prompts()
+        
+        # 获取PSAnalyzer的角色、任务和输出格式提示词
+        role = prompts["ps_analyzer"]["role"]
+        task = prompts["ps_analyzer"]["task"]
+        output_format = prompts["ps_analyzer"]["output"]
+        
         # 构建完整提示
         prompt = f"""
         # 角色: PS改写策略专家
         
-        你是一位专业的个人陈述(Personal Statement)顾问，擅长分析和提供PS改写策略。你熟悉各类研究生申请要求，能够准确把握院校期望，并根据申请者的背景提供个性化的改写建议。
+        {role}
         
         # 任务
         
-        请仔细分析提供的PS初稿，结合院校信息收集报告和支持文件分析报告，提出详细的改写策略。你的分析应该涵盖以下方面:
-        
-        1. PS整体评估：结构、逻辑、主题、文风等方面的总体评价
-        2. 内容与院校匹配度：PS内容与目标院校/专业要求的匹配程度
-        3. 优势亮点：PS中已经表现出的优势和亮点
-        4. 改进机会：需要改进的方面和具体建议
-        5. 支持材料整合：如何更好地将支持文件中的信息整合到PS中
-        6. 详细改写计划：分段落提出具体的改写建议
+        {task}
         
         # PS初稿内容
         
@@ -159,32 +169,7 @@ class PSAnalyzer:
         
         # 输出格式
         
-        请将你的分析整理为一份专业的PS改写策略报告，格式如下：
-        
-        # PS改写策略报告
-        
-        ## 整体评估
-        [对PS初稿的整体评价，包括结构、主题、逻辑等]
-        
-        ## 与院校匹配分析
-        [分析PS内容与目标院校/专业要求的匹配程度]
-        
-        ## 现有优势
-        [列出PS中已经表现出的优势和亮点]
-        
-        ## 需改进方面
-        [指出需要改进的关键方面]
-        
-        ## 支持材料整合建议
-        [如何更好地将支持文件中的信息整合到PS中]
-        
-        ## 段落改写建议
-        [为每个主要段落提供具体的改写建议]
-        
-        ## 改写要点总结
-        [总结5-8点关键改写要点]
-        
-        注意：请给出具体、实用的改写建议，而非抽象的一般性建议。引用PS初稿中的具体内容来说明改进点。
+        {output_format}
         """
         
         return prompt
