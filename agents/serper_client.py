@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import asyncio
+import re  # 添加re模块的导入
 from typing import Dict, Any, List, Optional
 import streamlit as st
 import traceback
@@ -1482,13 +1483,16 @@ class SerperClient:
                                 html_content = response.content.decode('utf-8', errors='replace')
                         
                         # 提取标题
-                        import re
+                        import re  # 导入re模块
                         title_match = re.search(r'<title>(.*?)</title>', html_content, re.IGNORECASE)
                         title = title_match.group(1) if title_match else url
                         
                         # 使用BeautifulSoup解析HTML
                         from bs4 import BeautifulSoup
                         try:
+                            # 导入所有需要的模块
+                            import re
+                            
                             # 使用BeautifulSoup解析HTML
                             soup = BeautifulSoup(html_content, 'html.parser')
                             
@@ -1507,6 +1511,7 @@ class SerperClient:
                             main_content = None
                             
                             # 1. 检查含有程序关键词的ID和类名
+                            import re  # 确保导入re模块用于正则表达式
                             for keyword in program_keywords:
                                 # 查找ID包含关键词的元素
                                 for element in soup.find_all(id=re.compile(f'.*{keyword}.*', re.IGNORECASE)):
@@ -1708,6 +1713,7 @@ class SerperClient:
         if not element:
             return ""
         
+        import re  # 确保在方法内部也导入re模块
         from bs4 import BeautifulSoup
         
         # 提取有用的文本
