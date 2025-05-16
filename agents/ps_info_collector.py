@@ -4,6 +4,8 @@ import asyncio
 from typing import Dict, Any, Optional
 import requests
 import json
+import traceback
+import time
 
 from .serper_client import SerperClient
 
@@ -33,7 +35,7 @@ class PSInfoCollector:
     
     async def collect_information(self, university: str, major: str, custom_requirements: str = "") -> str:
         """
-        收集大学和专业信息，生成院校信息收集报告。
+        收集大学和专业信息。
         
         Args:
             university: 目标大学
@@ -41,65 +43,76 @@ class PSInfoCollector:
             custom_requirements: 用户提供的自定义要求
             
         Returns:
-            格式化的院校信息收集报告
+            收集的院校信息报告
         """
-        try:
-            # === 第1步：创建明确的UI布局结构 ===
-            # 创建一个完全独立的主容器用于整个流程
-            main_container = st.container()
+        # 创建一个容器来组织UI
+        search_setup_container = st.container()
+        
+        with search_setup_container:
+            st.write(f"## 正在收集 {university} 的 {major} 专业信息")
             
-            with main_container:
-                # 1.1 首先创建所有可能需要使用的区域容器，避免布局混乱
-                search_setup_container = st.container()  # 搜索初始化区域
-                search_results_container = st.container()  # 搜索结果显示区域
-                report_container = st.container()  # 最终报告生成区域
-            
-            # === 第2步：初始化MCP客户端（在第一个区域） ===
-            with search_setup_container:
-                st.subheader("初始化搜索功能")
-                
-                # 创建专门的进度容器用于初始化进度条
-                init_progress_container = st.container()
-                
-                with init_progress_container:
-                    init_status = st.empty()
-                    init_status.info("正在初始化MCP搜索服务...")
-            
-            # 尝试初始化Serper客户端，确保进度显示在search_setup_container中
-            try:
-                initialized = await self.serper_client.initialize(main_container=search_setup_container)
-                
-                if not initialized:
-                    with search_setup_container:
-                        st.error("无法初始化搜索服务。将使用基础知识生成信息。")
+            # 检查是否需要初始化Serper客户端
+            if not hasattr(self.serper_client, 'search_tool_name') or not self.serper_client.search_tool_name:
+                try:
+                    st.info("正在初始化Web搜索客户端...")
+                    await self.serper_client.initialize(search_setup_container)
+                except Exception as init_error:
+                    st.error(f"初始化搜索客户端时出错: {str(init_error)}")
+                    st.warning("将使用基础知识生成院校信息。请注意，此信息可能不是最新的。")
                     return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
-            except Exception as e:
-                # 捕获所有可能的异常，确保程序不会终止
-                with search_setup_container:
-                    st.error(f"初始化搜索服务时出错: {str(e)}")
-                    st.warning("将使用基础知识生成院校信息。")
-                return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
+        
+        try:
+            # 准备搜索查询 - 添加更专业的搜索词以找到更多项目信息
+            search_terms = [
+                f"{university} {major} program",
+                f"{university} {major} admission requirements",
+                f"{university} {major} application",
+                f"{university} {major} curriculum"
+            ]
             
-            # 检查输入参数
-            if not university or not university.strip():
-                return "**错误：未提供目标大学。请输入一个有效的大学名称。**"
-                
-            if not major or not major.strip():
-                return "**错误：未提供目标专业。请输入一个有效的专业名称。**"
-            
-            # === 第3步：执行搜索（在第一个区域继续） ===
-            # 构建搜索查询
-            search_query = f"{university} {major} postgraduate program requirements application"
+            # 选择第一个搜索词作为主搜索
+            search_query = search_terms[0]
             
             with search_setup_container:
-                st.subheader("执行网络搜索")
-                st.info(f"正在搜索: {search_query}")
+                st.info(f"搜索查询: {search_query}")
             
             # 执行Web搜索，确保进度显示在search_setup_container中
             try:
+                # 第一次尝试搜索
                 search_results = await self.serper_client.search_web(search_query, main_container=search_setup_container)
                 
-                # 检查搜索结果是否包含错误
+                # 检查结果质量，如果不足够好，尝试备用查询
+                if (not search_results or "organic" not in search_results or 
+                   len(search_results.get("organic", [])) < 2 or
+                   all("example.com" in result.get("link", "") for result in search_results.get("organic", []))):
+                    
+                    # 尝试备用查询
+                    with search_setup_container:
+                        st.warning(f"第一次搜索未返回足够的结果，尝试备用查询")
+                    
+                    # 尝试其他搜索词
+                    for alternative_query in search_terms[1:]:
+                        with search_setup_container:
+                            st.info(f"备用搜索查询: {alternative_query}")
+                        
+                        alternative_results = await self.serper_client.search_web(alternative_query, main_container=search_setup_container)
+                        
+                        # 如果新结果更好，使用它们
+                        if (alternative_results and "organic" in alternative_results and 
+                            len(alternative_results.get("organic", [])) > len(search_results.get("organic", []))):
+                            
+                            with search_setup_container:
+                                st.success(f"备用查询返回了更好的结果")
+                            
+                            # 合并结果 - 添加新结果到原始结果中
+                            for result in alternative_results.get("organic", []):
+                                # 检查这个URL是否已经在结果中
+                                if not any(existing.get("link") == result.get("link") for existing in search_results.get("organic", [])):
+                                    search_results.setdefault("organic", []).append(result)
+                            
+                            break
+                
+                # 检查合并后的搜索结果是否包含错误
                 if "error" in search_results:
                     error_msg = search_results["error"]
                     with search_setup_container:
@@ -112,67 +125,151 @@ class PSInfoCollector:
                     with search_setup_container:
                         st.warning(f"未找到关于{university}的{major}专业的搜索结果。将使用基础知识生成信息。")
                     return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
-            except Exception as e:
+                
+                # 检查搜索结果是否都是模拟结果 (example.com链接)
+                if all("example.com" in result.get("link", "") for result in search_results.get("organic", [])):
+                    with search_setup_container:
+                        st.warning("搜索只返回了模拟结果，可能无法提供准确信息。将尝试使用基础知识补充。")
+                
+                # 显示找到的结果数量
+                with search_setup_container:
+                    result_count = len(search_results.get("organic", []))
+                    st.success(f"找到 {result_count} 条相关结果")
+                    
+                    # 在UI中展示搜索结果摘要
+                    with st.expander("搜索结果摘要", expanded=False):
+                        for i, result in enumerate(search_results.get("organic", [])[:5]):  # 只显示前5个结果
+                            st.write(f"**{i+1}. {result.get('title', '无标题')}**")
+                            st.caption(f"来源: {result.get('link', '无链接')}")
+                            st.write(result.get('snippet', '无摘要'))
+                            st.write("---")
+            
+            except Exception as search_error:
                 # 捕获所有可能的搜索异常
                 with search_setup_container:
-                    st.error(f"搜索过程中出现错误: {str(e)}")
+                    st.error(f"搜索过程中出现错误: {str(search_error)}")
                     st.warning("由于搜索错误，将使用基础知识生成院校信息。")
+                
+                # 记录详细错误信息
+                with search_setup_container:
+                    with st.expander("错误详情", expanded=False):
+                        st.code(traceback.format_exc())
+                
                 return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
             
-            # === 第4步：显示搜索结果（在第二个区域） ===
-            # 显示搜索结果摘要
-            if len(search_results.get('organic', [])) > 0:
-                with search_results_container:
-                    st.subheader("搜索结果摘要")
-                    st.caption(f"找到 {len(search_results.get('organic', []))} 条相关结果")
-                    for i, result in enumerate(search_results.get('organic', [])[:3], 1):
-                        st.markdown(f"**{i}. {result.get('title', '无标题')}**")
-                        st.caption(f"来源: {result.get('link', '无链接')}")
-            
-            # === 第5步：生成报告（在第三个区域） ===
-            # 根据搜索结果生成提示
+            # 构建信息生成的提示词
+            with search_setup_container:
+                st.write("## 处理收集到的信息")
+                generate_progress = st.progress(0)
+                generate_status = st.empty()
+                generate_status.info("准备生成院校信息报告...")
+                
+            # 构建提示
             prompt = self._build_info_prompt(university, major, search_results, custom_requirements)
             
-            # 在最后的区域显示最终报告生成进度
-            with report_container:
-                st.subheader("生成院校信息报告")
-                report_progress = st.progress(0)
-                report_status = st.empty()
-                
-                # 更新进度
-                report_status.info(f"使用 {self.model_name} 生成院校信息报告...")
-                report_progress.progress(30)
-                
-                # 调用OpenRouter API生成报告
+            # 更新UI进度
+            with search_setup_container:
+                generate_progress.progress(40)
+                generate_status.info(f"正在使用 {self.model_name} 分析搜索结果...")
+            
+            # 调用LLM生成报告
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "HTTP-Referer": "https://ps-assistant.streamlit.app", 
+                "X-Title": "PS Assistant Tool"
+            }
+            
+            payload = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            # 尝试请求LLM并处理可能的连接错误
+            max_retries = 2
+            current_retry = 0
+            response = None
+            
+            while current_retry <= max_retries:
                 try:
-                    report = self._call_openrouter_api(prompt, university, major)
+                    with search_setup_container:
+                        generate_status.info(f"正在生成报告 (尝试 {current_retry+1}/{max_retries+1})...")
                     
-                    # 更新进度
-                    report_progress.progress(100)
-                    if not report.startswith("**错误："):
-                        report_status.success("院校信息报告生成成功")
+                    # 发送API请求
+                    response = requests.post(self.api_url, headers=headers, json=payload, timeout=60)
+                    
+                    # 检查响应
+                    if response.status_code == 200:
+                        break  # 成功获取响应
                     else:
-                        report_status.error("院校信息报告生成失败")
+                        # API错误，可能需要重试
+                        with search_setup_container:
+                            generate_status.warning(f"API返回错误码: {response.status_code}, 尝试重试...")
+                        
+                        current_retry += 1
+                        if current_retry > max_retries:
+                            # 所有重试都失败
+                            raise Exception(f"API返回错误码: {response.status_code}, 响应: {response.text}")
+                        else:
+                            # 等待后重试
+                            time.sleep(2)
+                except (requests.RequestException, requests.Timeout) as e:
+                    # 连接错误，可能需要重试
+                    with search_setup_container:
+                        generate_status.warning(f"连接错误: {str(e)}, 尝试重试...")
                     
-                    return report
-                except Exception as e:
-                    # 处理API调用错误
-                    error_msg = f"**错误：生成报告时出错 - {str(e)}**"
-                    report_progress.progress(100)
-                    report_status.error("生成报告失败")
-                    
-                    with report_container:
-                        st.error(error_msg)
-                        st.warning("将使用基础知识生成院校信息。")
-                    
-                    return self._generate_info_with_llm(university, major, custom_requirements, report_container)
+                    current_retry += 1
+                    if current_retry > max_retries:
+                        raise Exception(f"连接错误: {str(e)}")
+                    else:
+                        # 等待后重试
+                        time.sleep(2)
+            
+            # 如果所有尝试都失败
+            if not response or response.status_code != 200:
+                with search_setup_container:
+                    generate_status.error("无法从API获取响应，尝试使用基础知识生成")
+                return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
+            
+            # 处理响应
+            result = response.json()
+            
+            # 提取内容
+            if "choices" in result and len(result["choices"]) > 0:
+                content = result["choices"][0]["message"]["content"]
+                
+                # 更新UI
+                with search_setup_container:
+                    generate_progress.progress(100)
+                    generate_status.success("院校信息收集完成！")
+                
+                # 显示结果数据源
+                with search_setup_container:
+                    with st.expander("信息来源", expanded=False):
+                        st.write("本报告基于以下来源生成:")
+                        for i, result in enumerate(search_results.get("organic", [])[:5]):
+                            st.write(f"{i+1}. [{result.get('title', '无标题')}]({result.get('link', '#')})")
+                
+                return content
+            else:
+                # 如果没有找到内容，使用备用方法
+                with search_setup_container:
+                    generate_status.error("API响应格式不正确，使用基础知识生成")
+                return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
         
         except Exception as e:
+            # 捕获所有其他异常
             error_msg = f"**错误：收集院校信息时出错 - {str(e)}**"
-            with st.container():
+            with search_setup_container:
                 st.error(error_msg)
+                
+                # 显示详细错误信息
+                with st.expander("错误详情", expanded=False):
+                    st.code(traceback.format_exc())
+                
                 st.warning("发生错误，将使用基础知识生成院校信息。请注意，此信息可能不是最新的。")
-            return self._generate_info_with_llm(university, major, custom_requirements)
+            
+            return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
             
     def _generate_info_with_llm(self, university: str, major: str, custom_requirements: str = "", main_container=None) -> str:
         """
