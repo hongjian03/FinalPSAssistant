@@ -294,8 +294,8 @@ class PSInfoCollector:
         
         # 确保我们有有机搜索结果
         if "organic" in search_results and search_results["organic"]:
-            # 限制为最相关的前5个结果
-            relevant_results = search_results["organic"][:5]
+            # 限制为最相关的前4个结果
+            relevant_results = search_results["organic"][:4]
             
             search_content += "以下是从Web搜索获取的相关信息：\n\n"
             
@@ -305,7 +305,7 @@ class PSInfoCollector:
                 link = result.get("link", "无链接")
                 snippet = result.get("snippet", result.get("description", "无内容摘要"))
                 
-                search_content += f"信息源 {i}: {title}\n"
+                search_content += f"## 信息源 {i}: {title}\n"
                 search_content += f"链接: {link}\n"
                 search_content += f"摘要: {snippet}\n\n"
                 
@@ -317,12 +317,19 @@ class PSInfoCollector:
                     if len(page_content) > max_content_length:
                         page_content = page_content[:max_content_length] + "...[内容过长已截断]"
                     
-                    search_content += f"网页详细内容:\n{page_content}\n\n"
+                    # 清理和格式化内容
+                    page_content = self._clean_and_format_content(page_content)
+                    
+                    search_content += f"### 网页详细内容:\n{page_content}\n\n"
                     search_content += "---\n\n"
+                else:
+                    search_content += "（未能获取此页面的详细内容）\n\n"
+                    search_content += "---\n\n"
+        
         # 兼容其他可能的结果格式
         elif "results" in search_results and search_results["results"]:
             # 适配一些搜索API返回的不同结构
-            relevant_results = search_results["results"][:5]
+            relevant_results = search_results["results"][:4]
             
             search_content += "以下是从Web搜索获取的相关信息：\n\n"
             
@@ -332,7 +339,7 @@ class PSInfoCollector:
                 link = result.get("link", result.get("url", "无链接"))
                 snippet = result.get("snippet", result.get("description", result.get("content", "无内容摘要")))
                 
-                search_content += f"信息源 {i}: {title}\n"
+                search_content += f"## 信息源 {i}: {title}\n"
                 search_content += f"链接: {link}\n"
                 search_content += f"摘要: {snippet}\n\n"
                 
@@ -344,12 +351,19 @@ class PSInfoCollector:
                     if len(page_content) > max_content_length:
                         page_content = page_content[:max_content_length] + "...[内容过长已截断]"
                     
-                    search_content += f"网页详细内容:\n{page_content}\n\n"
+                    # 清理和格式化内容
+                    page_content = self._clean_and_format_content(page_content)
+                    
+                    search_content += f"### 网页详细内容:\n{page_content}\n\n"
                     search_content += "---\n\n"
+                else:
+                    search_content += "（未能获取此页面的详细内容）\n\n"
+                    search_content += "---\n\n"
+        
         # 如果没有结构化的搜索结果，但有原始文本响应
         elif isinstance(search_results, str) and len(search_results) > 0:
             search_content += "以下是从Web搜索获取的相关信息：\n\n"
-            search_content += search_results[:2000] + "..." if len(search_results) > 2000 else search_results
+            search_content += search_results[:3000] + "..." if len(search_results) > 3000 else search_results
             search_content += "\n\n"
         else:
             search_content = "未找到相关搜索结果。请基于模型知识提供可能的信息，并明确标注是估计的信息。\n\n"
@@ -386,11 +400,49 @@ class PSInfoCollector:
         
         {role}
         
+        # 目标大学与专业
+        
+        - 大学名称: {university}
+        - 专业名称: {major}
+        
         # 任务
         
         {task}
         
         {custom_req_text}
+        
+        # 提取信息指南
+        
+        你需要从提供的搜索内容中提取以下关键信息:
+        
+        1. 项目名称与学位类型:
+           - 项目的正式名称
+           - 授予的学位类型(如硕士、博士等)
+           - 学制长度(如1年、2年等)
+        
+        2. 申请要求:
+           - 学历背景要求
+           - GPA要求(如3.0+/4.0)
+           - 语言要求(雅思/托福最低分数)
+           - 其他特殊要求(如工作经验、作品集等)
+        
+        3. 申请流程:
+           - 申请截止日期
+           - 申请材料清单
+           - 申请费用
+           - 录取流程与时间线
+        
+        4. 课程设置:
+           - 核心课程
+           - 选修课方向
+           - 实习/研究机会
+           - 特色项目
+        
+        5. 其他重要信息:
+           - 学费信息
+           - 奖学金机会
+           - 就业前景
+           - 官方联系方式
         
         # 搜索结果和网页内容
         
@@ -400,16 +452,48 @@ class PSInfoCollector:
         
         {output_format.replace("[大学名称]", university).replace("[专业名称]", major)}
         
-        重要提示：
-        1. 优先使用搜索结果中的信息，特别是网页详细内容中的信息，这些包含了完整的网页内容
-        2. 如果搜索结果中缺少某些信息，一定要使用你的知识进行合理补充，明确标注为"根据模型知识估计"
-        3. 保持客观专业的语气，专注于事实性信息
-        4. 如有冲突信息，请分析优先采用最可靠的来源（如官方网站信息）
-        5. 不要留下"待补充"或空白部分，一定要提供内容，即使是基于你的估计
-        6. 根据网页详细内容提取和整理有关课程设置、项目特色、申请截止日期等信息
+        # 重要提示
+        
+        1. **优先使用搜索结果**: 优先使用提供的网页内容信息，尤其是来自官方大学网站的信息
+        2. **保持准确性**: 确保所有信息准确无误，不要杜撰不存在的信息
+        3. **内容完整性**: 确保涵盖所有关键部分，避免省略重要信息
+        4. **明确标注估计信息**: 当搜索结果中缺少某些信息时，可以使用你的知识补充，但必须明确标注为"根据模型知识估计"
+        5. **信息来源**: 在报告末尾列出所有信息来源，如官方网站链接等
+        6. **格式严谨**: 保持专业的格式和语气，使用清晰的标题和小标题
+        7. **准确摘录**: 从网页内容中摘录准确的课程信息、申请要求和截止日期
+        8. **不要抄袭HTML或网页格式代码**: 只提取实质性内容，忽略HTML标签或格式代码
+        
+        确保最终报告是一份专业、全面、准确的院校信息收集报告，帮助申请者了解该项目的关键信息。
         """
         
         return prompt
+    
+    def _clean_and_format_content(self, content: str) -> str:
+        """清理和格式化网页内容，移除无用的HTML标记和格式化问题"""
+        # 简单替换一些常见的HTML实体
+        content = content.replace('&nbsp;', ' ')
+        content = content.replace('&amp;', '&')
+        content = content.replace('&lt;', '<')
+        content = content.replace('&gt;', '>')
+        content = content.replace('&quot;', '"')
+        
+        # 移除可能的JavaScript代码块
+        import re
+        content = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', content)
+        
+        # 尝试移除过多的空白行
+        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
+        
+        # 替换连续的空格
+        content = re.sub(r' {2,}', ' ', content)
+        
+        # 移除大多数标签但保留段落结构
+        content = re.sub(r'<[^>]*>', ' ', content)
+        
+        # 再次清理多余空格
+        content = re.sub(r' {2,}', ' ', content)
+        
+        return content
     
     def _call_openrouter_api(self, prompt: str, university: str, major: str) -> str:
         """调用OpenRouter API使用选定的模型生成报告"""
