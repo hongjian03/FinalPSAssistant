@@ -41,6 +41,8 @@ class SerperClient:
         self.available_tools = []
         # The correct search tool name (will be determined in initialize)
         self.search_tool_name = None
+        # The correct scrape tool name (will be determined in initialize)
+        self.scrape_tool_name = None
         # Maximum retries for connection issues
         self.max_retries = 3
     
@@ -96,8 +98,17 @@ class SerperClient:
                 "serper-search", 
                 "web-search",
                 "google-search",
-                "serper",
-                "scrape"
+                "serper"
+            ]
+            
+            # 可能的抓取工具名称
+            scrape_tool_candidates = [
+                "scrape",
+                "web-scrape",
+                "scrape-url",
+                "url-scrape",
+                "webpage-scrape",
+                "extract"
             ]
             
             # 显示基本连接信息
@@ -141,9 +152,10 @@ class SerperClient:
                                         
                                         # 成功获取工具列表
                                         if hasattr(tools_result, 'tools'):
+                                            # 保存所有可用工具
                                             self.available_tools = [t.name for t in tools_result.tools]
                                             progress_bar.progress(80)
-                                            status_text.info("已获取工具列表，正在查找搜索工具...")
+                                            status_text.info("已获取工具列表，正在查找搜索和抓取工具...")
                                             
                                             # 显示工具信息
                                             with st.expander("可用工具", expanded=False):
@@ -153,28 +165,53 @@ class SerperClient:
                                                         st.caption(f"描述: {tool.description}")
                                             
                                             # 查找搜索工具
+                                            search_tool_name = None
                                             for tool_name in search_tool_candidates:
                                                 if tool_name in self.available_tools:
-                                                    self.search_tool_name = tool_name
+                                                    search_tool_name = tool_name
+                                                    break
+                                            
+                                            # 查找抓取工具
+                                            scrape_tool_name = None
+                                            for tool_name in scrape_tool_candidates:
+                                                if tool_name in self.available_tools:
+                                                    scrape_tool_name = tool_name
                                                     break
                                             
                                             # 如果没找到，尝试模糊匹配
-                                            if not self.search_tool_name:
+                                            if not search_tool_name:
                                                 for tool_name in self.available_tools:
                                                     if "search" in tool_name.lower() or "google" in tool_name.lower():
-                                                        self.search_tool_name = tool_name
+                                                        search_tool_name = tool_name
                                                         break
                                             
+                                            if not scrape_tool_name:
+                                                for tool_name in self.available_tools:
+                                                    if "scrape" in tool_name.lower() or "extract" in tool_name.lower():
+                                                        scrape_tool_name = tool_name
+                                                        break
+                                            
+                                            # 保存找到的工具名称
+                                            self.search_tool_name = search_tool_name
+                                            self.scrape_tool_name = scrape_tool_name
+                                            
                                             # 检查是否找到工具
-                                            if self.search_tool_name:
+                                            if self.search_tool_name and self.scrape_tool_name:
+                                                progress_bar.progress(100)
+                                                status_text.success(f"MCP连接成功! 已选择搜索工具: {self.search_tool_name}, 抓取工具: {self.scrape_tool_name}")
+                                                return True
+                                            elif self.search_tool_name:
                                                 progress_bar.progress(100)
                                                 status_text.success(f"MCP连接成功! 已选择搜索工具: {self.search_tool_name}")
+                                                # 如果没有专门的抓取工具，将搜索工具也设为抓取工具
+                                                self.scrape_tool_name = self.search_tool_name
                                                 return True
                                             elif len(self.available_tools) > 0:
                                                 # 没找到搜索工具，使用第一个可用的
                                                 self.search_tool_name = self.available_tools[0]
+                                                self.scrape_tool_name = self.available_tools[0]
                                                 progress_bar.progress(100)
-                                                status_text.warning(f"未找到专用搜索工具，将使用 {self.search_tool_name} 工具作为替代")
+                                                status_text.warning(f"未找到专用工具，将使用 {self.search_tool_name} 作为替代")
                                                 return True
                                             else:
                                                 raise Exception("未找到任何可用工具")
@@ -232,10 +269,11 @@ class SerperClient:
                 
             # 设置默认搜索工具
             self.search_tool_name = search_tool_candidates[0]
-            self.available_tools = [self.search_tool_name]
+            self.scrape_tool_name = scrape_tool_candidates[0]
+            self.available_tools = [self.search_tool_name, self.scrape_tool_name]
             
             progress_bar.progress(100)
-            status_text.warning(f"无法完美连接MCP服务，使用默认搜索工具: {self.search_tool_name}")
+            status_text.warning(f"无法完美连接MCP服务，使用默认搜索工具: {self.search_tool_name}, 抓取工具: {self.scrape_tool_name}")
             
             return True
     
@@ -259,10 +297,10 @@ class SerperClient:
             scrape_progress = st.progress(0)
             scrape_status.info(f"正在抓取网页内容: {url}")
             
-            # 检查是否有搜索工具可用
-            if not self.search_tool_name:
-                scrape_status.error("未找到有效的搜索工具")
-                return f"无法抓取 {url} 的内容：未找到有效的搜索工具"
+            # 检查是否有抓取工具可用
+            if not hasattr(self, 'scrape_tool_name') or not self.scrape_tool_name:
+                scrape_status.warning("未找到有效的抓取工具，将使用直接抓取方法")
+                return await self.direct_scrape(url, main_container)
             
             # 最大重试次数
             max_retries = 3
@@ -272,261 +310,148 @@ class SerperClient:
             last_error = None
             
             while current_retry < max_retries:
-                scrape_progress.progress(10 + current_retry * 10)  # 更新进度条
+                scrape_progress.progress(10 + current_retry * 10)
+                scrape_status.info(f"尝试使用MCP抓取URL内容 (尝试 {current_retry+1}/{max_retries})")
                 
                 try:
-                    # 使用不同的工具尝试抓取
-                    if current_retry == 0:
-                        # 第一次尝试：使用当前搜索工具
-                        tool_name = self.search_tool_name
-                        scrape_status.info(f"尝试使用 {tool_name} 抓取 (尝试 {current_retry+1}/{max_retries})")
-                    elif current_retry == 1:
-                        # 第二次尝试：使用"google_search"工具
-                        tool_name = "google_search"
-                        scrape_status.info(f"尝试使用备用方法 google_search 抓取 (尝试 {current_retry+1}/{max_retries})")
-                    else:
-                        # 第三次尝试：使用"serper"或"search"工具
-                        if "serper" in self.available_tools:
-                            tool_name = "serper"
-                        elif "search" in self.available_tools:
-                            tool_name = "search"
-                        else:
-                            tool_name = self.search_tool_name
-                        scrape_status.info(f"尝试使用备用方法 {tool_name} 抓取 (尝试 {current_retry+1}/{max_retries})")
-                    
-                    # 更新进度
-                    scrape_progress.progress(20 + current_retry * 10)
-                    
-                    # 预处理TaskGroup错误检测 - 这是一个预防措施
-                    try:
-                        # 设置较短的连接超时
-                        async with asyncio.timeout(30):
-                            # 使用streamable_http_client连接到服务器
-                            async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
-                                # 更新进度
-                                scrape_progress.progress(40 + current_retry * 10)
+                    # 设置连接超时
+                    async with asyncio.timeout(30):
+                        # 使用streamable_http_client连接到服务器
+                        async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
+                            scrape_progress.progress(30 + current_retry * 10)
+                            scrape_status.info("创建MCP会话...")
+                            
+                            # 创建MCP会话
+                            async with mcp.ClientSession(read_stream, write_stream) as session:
+                                # 初始化会话
+                                await session.initialize()
+                                scrape_progress.progress(50 + current_retry * 10)
                                 
+                                # 准备抓取参数
+                                args = {"url": url}
+                                scrape_status.info(f"正在使用 {self.scrape_tool_name} 抓取URL: {url}")
+                                
+                                # 调用抓取工具
                                 try:
-                                    # 使用较短的会话操作超时
+                                    # 设置工具调用超时
                                     async with asyncio.timeout(25):
-                                        # 创建MCP会话
-                                        async with mcp.ClientSession(read_stream, write_stream) as session:
-                                            # 初始化会话
-                                            await session.initialize()
+                                        result = await session.call_tool(self.scrape_tool_name, arguments=args)
+                                        
+                                        # 处理结果
+                                        if hasattr(result, 'result'):
+                                            # 成功获取结果
+                                            scrape_status.success("成功抓取网页内容")
+                                            scrape_progress.progress(100)
                                             
-                                            # 更新进度
-                                            scrape_progress.progress(60 + current_retry * 10)
-                                            
-                                            # 准备参数
-                                            args = None
-                                            
-                                            # 根据工具类型选择合适的参数
-                                            if tool_name == "scrape":
-                                                # 使用专门的抓取工具
-                                                args = {"url": url}
-                                                scrape_status.info(f"使用scrape工具抓取网页: {url}")
-                                            elif "search" in tool_name.lower() or tool_name in ["google_search", "serper", "serper-search"]:
-                                                # 使用搜索工具抓取特定URL的信息
-                                                # 根据URL构建更精确的搜索查询
-                                                domain = url.split('//')[-1].split('/')[0]
-                                                path = '/'.join(url.split('/')[3:]) if len(url.split('/')) > 3 else ""
-                                                search_query = f"site:{domain}"
-                                                
-                                                if path:
-                                                    # 尝试提取页面关键词用于搜索
-                                                    path_keywords = ' '.join(path.replace('-', ' ').replace('_', ' ').split('/'))
-                                                    if len(path_keywords) > 0:
-                                                        search_query += f" {path_keywords}"
-                                                        
-                                                scrape_status.info(f"搜索查询: {search_query}")
-                                                
-                                                if tool_name == "google_search":
-                                                    args = {
-                                                        "query": search_query,
-                                                        "gl": "us",
-                                                        "hl": "en", 
-                                                        "numResults": 3
-                                                    }
+                                            if isinstance(result.result, str):
+                                                # 直接返回字符串结果
+                                                return result.result
+                                            elif isinstance(result.result, dict):
+                                                # 提取字典结果中的内容
+                                                if "content" in result.result:
+                                                    return result.result["content"]
+                                                elif "text" in result.result:
+                                                    return result.result["text"]
                                                 else:
-                                                    args = {"query": search_query}
-                                                
-                                                scrape_status.info(f"使用{tool_name}工具查询网页内容")
+                                                    # 将整个字典格式化为文本
+                                                    formatted_result = []
+                                                    
+                                                    # 添加标题
+                                                    if "title" in result.result:
+                                                        formatted_result.append(f"# {result.result['title']}")
+                                                    
+                                                    # 添加内容或摘要
+                                                    for key in ["body", "snippet", "html", "description"]:
+                                                        if key in result.result and result.result[key]:
+                                                            formatted_result.append(str(result.result[key]))
+                                                    
+                                                    # 添加URL
+                                                    formatted_result.append(f"\n来源: {url}")
+                                                    
+                                                    # 返回格式化文本
+                                                    return "\n\n".join(formatted_result)
                                             else:
-                                                # 尝试使用其他工具
-                                                args = {"url": url}
-                                                scrape_status.info(f"尝试使用{tool_name}工具抓取网页")
+                                                # 其他类型结果转为字符串
+                                                return str(result.result)
+                                        else:
+                                            # 抓取结果没有预期的result属性
+                                            if hasattr(result, 'error') and result.error:
+                                                # 有明确的错误信息
+                                                last_error = f"抓取错误: {result.error}"
+                                                scrape_status.warning(f"抓取工具返回错误: {result.error}")
+                                            else:
+                                                # 没有明确错误信息
+                                                last_error = "抓取结果格式不正确"
+                                                scrape_status.warning("抓取结果格式不正确")
                                             
-                                            # 使用较短的工具调用超时，避免永久挂起
-                                            try:
-                                                async with asyncio.timeout(20):
-                                                    # 更新进度  
-                                                    scrape_progress.progress(70 + current_retry * 5)
-                                                    
-                                                    # 调用MCP工具
-                                                    result = await session.call_tool(tool_name, arguments=args)
-                                                    
-                                                    # 更新进度
-                                                    scrape_progress.progress(90)
-                                                    
-                                                    # 处理结果
-                                                    if hasattr(result, 'result'):
-                                                        # 成功获取结果
-                                                        scrape_status.success(f"MCP {tool_name} 成功获取内容")
-                                                        scrape_progress.progress(100)
-                                                        
-                                                        if isinstance(result.result, str):
-                                                            return result.result
-                                                        elif isinstance(result.result, dict):
-                                                            # 从搜索结果中提取内容
-                                                            if "organic" in result.result and len(result.result["organic"]) > 0:
-                                                                # 合并前3个结果的内容
-                                                                organic_results = result.result["organic"][:3]
-                                                                combined_content = ""
-                                                                
-                                                                for i, item in enumerate(organic_results):
-                                                                    title = item.get("title", f"结果 {i+1}")
-                                                                    snippet = item.get("snippet", "")
-                                                                    
-                                                                    combined_content += f"## {title}\n\n{snippet}\n\n"
-                                                                    
-                                                                    # 添加链接信息
-                                                                    if "link" in item:
-                                                                        combined_content += f"链接: {item['link']}\n\n"
-                                                                    
-                                                                    # 添加分隔符
-                                                                    if i < len(organic_results) - 1:
-                                                                        combined_content += "---\n\n"
-                                                                
-                                                                return combined_content
-                                                            else:
-                                                                # 返回JSON格式的结果
-                                                                return json.dumps(result.result, ensure_ascii=False, indent=2)
-                                                        elif isinstance(result.result, list):
-                                                            # 处理列表类型的结果
-                                                            list_content = ""
-                                                            for i, item in enumerate(result.result[:5]):  # 最多取前5项
-                                                                if isinstance(item, dict):
-                                                                    title = item.get("title", f"项目 {i+1}")
-                                                                    content = item.get("content", item.get("snippet", item.get("description", "")))
-                                                                    list_content += f"## {title}\n\n{content}\n\n"
-                                                                else:
-                                                                    list_content += f"## 项目 {i+1}\n\n{str(item)}\n\n"
-                                                            
-                                                            return list_content if list_content else "获取到列表结果，但内容为空"
-                                                        else:
-                                                            # 其他类型的结果转为字符串
-                                                            return str(result.result)
-                                                    else:
-                                                        # 没有result属性，尝试其他方法
-                                                        last_error = "MCP返回结果格式不正确，缺少result属性"
-                                                        raise ValueError(last_error)
-                                            except asyncio.TimeoutError:
-                                                # 工具调用超时，尝试下一个工具
-                                                scrape_status.warning(f"工具调用超时 (尝试 {current_retry+1}/{max_retries})")
-                                                last_error = "工具调用超时，尝试其他方法"
-                                                current_retry += 1
+                                            # 增加重试计数
+                                            current_retry += 1
+                                            if current_retry < max_retries:
+                                                await asyncio.sleep(1)
                                                 continue
-                                            except Exception as tool_error:
-                                                error_msg = str(tool_error)
-                                                last_error = error_msg
-                                                
-                                                # 特殊处理TaskGroup错误
-                                                if "TaskGroup" in error_msg or "asyncio" in error_msg:
-                                                    scrape_status.warning(f"工具调用出现TaskGroup错误，尝试其他方法 (尝试 {current_retry+1}/{max_retries})")
-                                                    current_retry += 1
-                                                    continue
-                                                else:
-                                                    # 其他错误，检查是否有重试机会
-                                                    scrape_status.warning(f"工具调用错误: {error_msg[:50]}... (尝试 {current_retry+1}/{max_retries})")
-                                                    current_retry += 1
-                                                    continue
+                                            else:
+                                                # 所有重试都失败，切换到直接抓取
+                                                scrape_status.warning("MCP抓取多次失败，切换到直接抓取")
+                                                return await self.direct_scrape(url, main_container)
                                 except asyncio.TimeoutError:
-                                    # 会话操作超时，尝试下一次
-                                    scrape_status.warning(f"MCP会话操作超时 (尝试 {current_retry+1}/{max_retries})")
-                                    last_error = "MCP会话操作超时，尝试其他方法"
+                                    # 工具调用超时
+                                    last_error = "工具调用超时"
+                                    scrape_status.warning(f"抓取工具调用超时 (尝试 {current_retry+1}/{max_retries})")
                                     current_retry += 1
-                                    continue
-                                except Exception as session_error:
-                                    error_msg = str(session_error)
+                                    if current_retry < max_retries:
+                                        await asyncio.sleep(1)
+                                        continue
+                                    else:
+                                        # 所有重试都失败，切换到直接抓取
+                                        scrape_status.warning("MCP抓取多次超时，切换到直接抓取")
+                                        return await self.direct_scrape(url, main_container)
+                                except Exception as tool_error:
+                                    # 工具调用异常
+                                    error_msg = str(tool_error)
                                     last_error = error_msg
                                     
                                     # 特殊处理TaskGroup错误
                                     if "TaskGroup" in error_msg or "asyncio" in error_msg:
-                                        scrape_status.warning(f"MCP会话出现TaskGroup错误，尝试其他方法 (尝试 {current_retry+1}/{max_retries})")
-                                        current_retry += 1
+                                        scrape_status.warning(f"抓取工具出现TaskGroup错误 (尝试 {current_retry+1}/{max_retries})")
+                                    else:
+                                        scrape_status.warning(f"抓取工具错误: {error_msg[:100]}")
+                                    
+                                    # 增加重试计数
+                                    current_retry += 1
+                                    if current_retry < max_retries:
+                                        await asyncio.sleep(1)
                                         continue
                                     else:
-                                        # 其他错误，尝试下一次
-                                        scrape_status.warning(f"MCP会话错误: {error_msg[:50]}... (尝试 {current_retry+1}/{max_retries})")
-                                        current_retry += 1
-                                        continue
-                    except asyncio.TimeoutError:
-                        # 连接超时，尝试下一次
-                        scrape_status.warning(f"MCP连接超时 (尝试 {current_retry+1}/{max_retries})")
-                        last_error = "MCP连接超时，尝试其他方法"
-                        current_retry += 1
-                        continue
-                    except Exception as conn_error:
-                        error_msg = str(conn_error)
-                        last_error = error_msg
-                        
-                        # 特殊处理TaskGroup错误
-                        if "TaskGroup" in error_msg or "asyncio" in error_msg:
-                            scrape_status.warning(f"MCP连接出现TaskGroup错误，尝试其他方法 (尝试 {current_retry+1}/{max_retries})")
-                            current_retry += 1
-                            continue
-                        else:
-                            # 其他错误，尝试下一次
-                            scrape_status.warning(f"MCP连接错误: {error_msg[:50]}... (尝试 {current_retry+1}/{max_retries})")
-                            current_retry += 1
-                            continue
-                
-                except Exception as e:
-                    # 处理所有其他错误
+                                        # 所有重试都失败，切换到直接抓取
+                                        scrape_status.warning("MCP抓取多次出错，切换到直接抓取")
+                                        return await self.direct_scrape(url, main_container)
+                except (asyncio.TimeoutError, Exception) as e:
+                    # 连接或会话异常
                     error_msg = str(e)
                     last_error = error_msg
                     
                     # 更新状态
-                    scrape_status.warning(f"抓取错误: {error_msg[:100]}... (尝试 {current_retry+1}/{max_retries})")
+                    if "TaskGroup" in error_msg or "asyncio" in error_msg:
+                        scrape_status.warning(f"MCP连接出现TaskGroup错误 (尝试 {current_retry+1}/{max_retries})")
+                    elif "timeout" in error_msg.lower():
+                        scrape_status.warning(f"MCP连接超时 (尝试 {current_retry+1}/{max_retries})")
+                    else:
+                        scrape_status.warning(f"MCP连接错误: {error_msg[:100]} (尝试 {current_retry+1}/{max_retries})")
                     
-                    # 继续下一次尝试
+                    # 增加重试计数
                     current_retry += 1
-                    continue
+                    if current_retry < max_retries:
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        # 所有重试都失败，切换到直接抓取
+                        scrape_status.warning("MCP连接多次失败，切换到直接抓取")
+                        return await self.direct_scrape(url, main_container)
             
-            # 如果所有重试都失败，返回一个提供最后错误信息的友好消息
-            scrape_progress.progress(100)
-            scrape_status.error("所有抓取方法都失败")
-            
-            # 尝试直接抓取URL内容作为最后手段
-            try:
-                scrape_status.info("尝试直接抓取URL内容...")
-                # 使用requests直接抓取
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    # 检查内容类型，只处理文本
-                    content_type = response.headers.get('Content-Type', '')
-                    if 'text/html' in content_type or 'text/plain' in content_type:
-                        # 提取页面标题
-                        import re
-                        title_match = re.search(r'<title>(.*?)</title>', response.text, re.IGNORECASE)
-                        title = title_match.group(1) if title_match else url
-                        
-                        # 限制内容大小
-                        content = response.text[:10000] + "..." if len(response.text) > 10000 else response.text
-                        
-                        scrape_status.success("成功直接抓取URL内容")
-                        return f"## {title}\n\n{content}\n\n来源: {url}"
-            except Exception as req_error:
-                # 直接抓取也失败，记录错误
-                with st.expander("直接抓取错误详情"):
-                    st.error(f"直接抓取失败: {str(req_error)}")
-            
-            # 所有方法都失败，返回错误信息
-            error_details = f"最后错误: {last_error}" if last_error else "多次尝试失败，无法获取详细错误信息"
-            with st.expander("抓取错误详情"):
-                st.error(error_details)
-            
-            return f"无法抓取 {url} 的内容。尝试了多种方法但都失败了。\n{error_details}\n\n建议访问网站手动查看内容。"
+            # 如果执行到这里，表示所有重试都已用完但没有返回结果
+            # 使用直接抓取作为最后手段
+            scrape_status.warning("所有MCP抓取尝试均失败，切换到直接抓取")
+            return await self.direct_scrape(url, main_container)
     
     async def search_web(self, query: str, main_container=None) -> Dict[str, Any]:
         """
@@ -819,9 +744,14 @@ class SerperClient:
         # 计数器和处理过的URL跟踪
         processed_count = 0
         processed_urls = set()
+        max_to_process = 5  # 限制处理的大学网站数量，避免过多请求
         
         # 首先找到和处理最可能的大学相关URL
         university_results = []
+        
+        with main_container:
+            status_text.info("识别大学相关网站...")
+        
         for i, result in enumerate(results_to_process):
             if "link" in result and result["link"]:
                 url = result["link"]
@@ -841,37 +771,59 @@ class SerperClient:
                 
                 # 关键词检查
                 if not is_uni_site:
-                    for keyword in uni_keywords:
-                        if keyword in url.lower() or (result.get("title") and keyword in result["title"].lower()):
-                            is_uni_site = True
-                            break
+                    if result.get("title"):
+                        title_text = result["title"].lower()
+                        for keyword in uni_keywords:
+                            if keyword in url.lower() or keyword in title_text:
+                                is_uni_site = True
+                                break
                 
                 # 如果是大学网站，加入优先处理列表
                 if is_uni_site:
                     university_results.append((i, result, url))
         
-        # 对大学网站结果进行处理，最多处理5个
-        for i, result, url in university_results[:5]:
+        # 对大学网站结果进行处理，限制处理数量
+        with main_container:
+            if university_results:
+                status_text.info(f"找到 {len(university_results)} 个大学相关网站，开始获取详细内容...")
+            else:
+                status_text.warning("未找到大学相关网站，跳过内容增强步骤")
+                enrich_progress.progress(100)
+                return search_results
+        
+        # 创建任务列表，准备并行处理
+        tasks = []
+        for i, result, url in university_results[:max_to_process]:
+            # 标记URL为已处理
+            processed_urls.add(url)
+            tasks.append((i, result, url))
+        
+        # 逐个处理任务，避免并行导致的TaskGroup错误
+        for idx, (i, result, url) in enumerate(tasks):
             # 更新进度
+            task_progress = 20 + (idx * 80 // len(tasks))
             with main_container:
-                processed_urls.add(url)
-                status_text.info(f"抓取大学网站内容: {url}")
-                enrich_progress.progress(20 + 10 * processed_count)
+                enrich_progress.progress(task_progress)
+                status_text.info(f"抓取大学网站 ({idx+1}/{len(tasks)}): {url}")
             
-            # 抓取页面内容
             try:
-                # 使用直接抓取
-                page_content = await self.direct_scrape(url, main_container)
+                # 使用抓取工具获取内容
+                if hasattr(self, 'scrape_tool_name') and self.scrape_tool_name:
+                    # 使用专门的抓取方法
+                    page_content = await self.scrape_url(url, main_container)
+                else:
+                    # 使用直接抓取方法
+                    page_content = await self.direct_scrape(url, main_container)
                 
                 # 检查结果是否有效
-                if page_content and not page_content.startswith(("# 无法抓取内容", "# 抓取错误")):
-                    # 存储原始page_content以防内容转换失败
+                if page_content and len(page_content) > 200 and not page_content.startswith(("# 无法抓取内容", "# 抓取错误")):
+                    # 存储原始page_content，以防内容转换失败可以恢复
                     original_content = search_results['organic'][i].get('page_content', '')
                     
                     # 添加到搜索结果
                     search_results['organic'][i]['page_content'] = page_content
                     
-                    # 增加权重（通过复制结果或移动到前面）
+                    # 对抓取的大学网站增加权重（通过复制结果或移动到前面）
                     if i > 0:
                         # 创建副本并移到前面
                         university_entry = search_results['organic'][i].copy()
@@ -884,14 +836,26 @@ class SerperClient:
                 else:
                     with main_container:
                         status_text.warning(f"无法有效抓取: {url}")
+                        
+                # 每次抓取后稍等片刻，避免连续请求导致TaskGroup错误
+                await asyncio.sleep(0.5)
+                
             except Exception as e:
                 with main_container:
                     status_text.error(f"抓取过程中出错: {str(e)[:100]}...")
+                    with st.expander("错误详情", expanded=False):
+                        st.code(traceback.format_exc())
+                        
+                # 出错后等待略长时间，以便系统恢复
+                await asyncio.sleep(1)
         
         # 完成增强
         with main_container:
             enrich_progress.progress(100)
-            status_text.success(f"增强完成，成功抓取 {processed_count} 个大学网站")
+            if processed_count > 0:
+                status_text.success(f"增强完成，成功抓取 {processed_count} 个大学网站内容")
+            else:
+                status_text.warning("未能成功抓取任何大学网站内容")
         
         return search_results
     
@@ -1102,19 +1066,41 @@ class SerperClient:
                 "Content-Type": "application/json"
             }
             
+            # 确保包含所有必需参数：query、gl（地区代码）和hl（语言）
             payload = {
-                "q": query,
-                "gl": "us",
-                "hl": "en",
-                "num": 10,
-                "autocorrect": True
+                "q": query,          # 查询词
+                "gl": "us",          # 地区代码：美国
+                "hl": "en",          # 语言：英语
+                "num": 10,           # 结果数量
+                "autocorrect": True  # 自动纠正拼写
             }
             
             # 记录搜索参数
-            status_text.info(f"搜索参数: query='{query}'")
+            status_text.info(f"搜索参数: query='{query}', gl='us', hl='en'")
             
-            # 发送请求到Serper API
-            response = requests.post(serper_url, headers=headers, json=payload)
+            # 最大重试次数
+            max_retries = 2
+            current_retry = 0
+            response = None
+            last_error = None
+            
+            # 添加重试逻辑处理临时性网络问题
+            while current_retry <= max_retries:
+                try:
+                    # 发送请求到Serper API
+                    response = requests.post(serper_url, headers=headers, json=payload, timeout=20)
+                    break  # 成功获取响应，退出循环
+                except requests.RequestException as e:
+                    last_error = e
+                    current_retry += 1
+                    if current_retry <= max_retries:
+                        status_text.warning(f"API请求失败，正在重试 ({current_retry}/{max_retries})...")
+                        time.sleep(1)
+                    else:
+                        # 所有重试都失败
+                        progress_bar.progress(100)
+                        status_text.error(f"无法连接到Serper API: {str(e)}")
+                        return self._generate_mock_results(query)
             
             # 更新UI进度
             progress_bar.progress(80)
@@ -1206,19 +1192,28 @@ class SerperClient:
             else:
                 # 处理API错误
                 progress_bar.progress(100)
-                status_text.error(f"搜索失败: {response.status_code}")
+                
+                try:
+                    error_json = response.json()
+                    error_message = error_json.get("message", str(response.status_code))
+                    status_text.error(f"搜索失败: {error_message}")
+                    
+                    # 显示详细错误信息
+                    with st.expander("API错误详情", expanded=False):
+                        st.code(json.dumps(error_json, indent=2))
+                        
+                except:
+                    # 如果无法解析JSON，直接显示文本
+                    status_text.error(f"搜索失败: {response.status_code} - {response.text}")
                 
                 # 生成模拟结果
                 search_results = self._generate_mock_results(query)
                 
                 # 显示错误信息
-                try:
-                    error_content = response.json()
-                    st.info(f"系统将使用已有知识生成信息 - API错误: {json.dumps(error_content)}")
-                except:
-                    st.info(f"系统将使用已有知识生成信息 - API响应: {response.text}")
+                status_text.info("由于API错误，将使用模拟结果")
                 
                 return search_results
+                
         except Exception as e:
             error_msg = str(e)
             
@@ -1226,6 +1221,10 @@ class SerperClient:
             if progress_bar and status_text:
                 progress_bar.progress(100)
                 status_text.error(f"搜索过程中出错: {error_msg}")
+                
+                # 显示详细错误
+                with st.expander("错误详情", expanded=False):
+                    st.code(traceback.format_exc())
             
             # 生成模拟结果
             return self._generate_mock_results(query)
@@ -1268,7 +1267,7 @@ class SerperClient:
     
     def run_async(self, coroutine):
         """Helper method to run async methods synchronously."""
-        return asyncio.run(coroutine)
+        return asyncio.run(coroutine) 
 
     async def direct_scrape(self, url: str, main_container=None) -> str:
         """
@@ -1294,17 +1293,18 @@ class SerperClient:
                 scrape_progress.progress(30)
                 scrape_status.info("发送HTTP请求...")
                 
-                # 添加用户代理头，模拟浏览器
+                # 添加用户代理头，模拟现代浏览器
                 headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.5",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
                     "Connection": "keep-alive",
-                    "Upgrade-Insecure-Requests": "1"
+                    "Upgrade-Insecure-Requests": "1",
+                    "Cache-Control": "max-age=0"
                 }
                 
                 # 使用较短的超时发送请求
-                max_retries = 2
+                max_retries = 3  # 增加重试次数
                 current_retry = 0
                 response = None
                 last_error = None
@@ -1312,7 +1312,7 @@ class SerperClient:
                 while current_retry <= max_retries:
                     try:
                         scrape_status.info(f"尝试发送请求 (尝试 {current_retry+1}/{max_retries+1})...")
-                        response = requests.get(url, headers=headers, timeout=15)
+                        response = requests.get(url, headers=headers, timeout=20, verify=True)
                         break  # 如果成功，跳出循环
                     except Exception as e:
                         last_error = e
@@ -1339,15 +1339,26 @@ class SerperClient:
                     # 检查内容类型
                     content_type = response.headers.get('Content-Type', '')
                     if 'text/html' in content_type:
-                        # 尝试提取主要内容
-                        html_content = response.text
+                        # 处理可能的编码问题
+                        try:
+                            # 首先尝试使用响应的编码
+                            html_content = response.text
+                        except UnicodeDecodeError:
+                            # 如果失败，尝试检测编码
+                            try:
+                                import chardet
+                                detected_encoding = chardet.detect(response.content)['encoding']
+                                html_content = response.content.decode(detected_encoding or 'utf-8', errors='replace')
+                            except:
+                                # 最后的备选方案
+                                html_content = response.content.decode('utf-8', errors='replace')
                         
                         # 提取标题
                         import re
                         title_match = re.search(r'<title>(.*?)</title>', html_content, re.IGNORECASE)
                         title = title_match.group(1) if title_match else url
                         
-                        # 清理HTML标签，提取纯文本
+                        # 使用BeautifulSoup解析HTML
                         from bs4 import BeautifulSoup
                         try:
                             # 使用BeautifulSoup解析HTML
@@ -1357,13 +1368,17 @@ class SerperClient:
                             for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'iframe', 'noscript']):
                                 element.extract()
                             
-                            # 尝试查找主要内容 - 先尝试找到程序或课程相关内容
-                            program_keywords = ['program', 'programme', 'course', 'degree', 'master', 'msc', 'ma', 'phd', 'curriculum']
+                            # 大学项目相关关键词
+                            program_keywords = [
+                                'program', 'programme', 'course', 'degree', 'master', 'msc', 'ma', 'phd', 
+                                'curriculum', 'admission', 'requirements', 'apply', 'application', 'overview',
+                                'syllabus', 'modules', 'faculty', 'department', 'research'
+                            ]
                             
                             # 尝试找到主要内容区域
                             main_content = None
                             
-                            # 第一步：检查含有课程关键词的ID和类名
+                            # 1. 检查含有程序关键词的ID和类名
                             for keyword in program_keywords:
                                 # 查找ID包含关键词的元素
                                 for element in soup.find_all(id=re.compile(f'.*{keyword}.*', re.IGNORECASE)):
@@ -1381,7 +1396,7 @@ class SerperClient:
                                 if main_content:
                                     break
                             
-                            # 第二步：寻找常见的程序信息容器
+                            # 2. 查找常见的内容容器
                             if not main_content:
                                 content_candidates = [
                                     soup.find('main'),
@@ -1392,7 +1407,11 @@ class SerperClient:
                                     soup.find(class_='content'),
                                     soup.find(role='main'),
                                     soup.find(class_='program-details'),
-                                    soup.find(class_='course-details')
+                                    soup.find(class_='course-details'),
+                                    soup.find(class_='description'),
+                                    soup.find(class_='program-description'),
+                                    soup.find(id='program-details'),
+                                    soup.find(id='course-details')
                                 ]
                                 
                                 for candidate in content_candidates:
@@ -1400,231 +1419,243 @@ class SerperClient:
                                         main_content = candidate
                                         break
                             
-                            # 第三步：尝试查找包含关键词的段落和标题集合
-                            if not main_content or len(main_content.get_text(strip=True)) < 500:
-                                program_sections = []
+                            # 3. 查找特定的HTML5标记元素
+                            if not main_content:
+                                for tag in ['article', 'section', 'main']:
+                                    elements = soup.find_all(tag)
+                                    for element in elements:
+                                        if len(element.get_text(strip=True)) > 300:
+                                            main_content = element
+                                            break
+                                    if main_content:
+                                        break
+                            
+                            # 4. 尝试查找包含关键词的段落和标题集合
+                            program_sections = []
+                            
+                            # 找所有标题，尤其注重包含关键词的部分
+                            for heading in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+                                heading_text = heading.get_text(strip=True).lower()
                                 
-                                # 找所有可能的标题
-                                for heading in soup.find_all(['h1', 'h2', 'h3']):
-                                    heading_text = heading.get_text(strip=True).lower()
+                                # 检查标题是否包含相关关键词
+                                if any(keyword in heading_text for keyword in program_keywords):
+                                    # 初始化这个部分的内容
+                                    section_content = []
+                                    section_content.append(f"# {heading.get_text(strip=True)}")
                                     
-                                    # 检查标题是否包含课程关键词
-                                    if any(keyword in heading_text for keyword in program_keywords + ['admission', 'apply', 'requirement', 'application', 'fee']):
-                                        # 找到这个标题后面的内容，直到下一个同级或更高级标题
-                                        section_content = []
-                                        section_content.append(f"# {heading.get_text(strip=True)}")
+                                    # 获取这个标题之后的内容
+                                    next_sibling = heading.find_next_sibling()
+                                    while next_sibling:
+                                        # 如果找到新标题，结束收集
+                                        if next_sibling.name in ['h1', 'h2', 'h3', 'h4']:
+                                            break
                                         
-                                        # 获取当前元素的下一个兄弟元素
-                                        next_element = heading.next_sibling
-                                        while next_element:
-                                            # 如果找到新的标题，停止
-                                            if next_element.name in ['h1', 'h2', 'h3', 'h4']:
-                                                break
-                                                
-                                            # 提取文本内容
-                                            if hasattr(next_element, 'get_text'):
-                                                text = next_element.get_text(strip=True)
-                                                if text:
+                                        # 提取有意义的文本，忽略空内容
+                                        if next_sibling.name in ['p', 'ul', 'ol', 'table', 'div']:
+                                            text = next_sibling.get_text(strip=True)
+                                            if text and len(text) > 10:  # 非空且有意义
+                                                # 列表项特殊处理
+                                                if next_sibling.name in ['ul', 'ol']:
+                                                    list_items = []
+                                                    for li in next_sibling.find_all('li'):
+                                                        li_text = li.get_text(strip=True)
+                                                        if li_text:
+                                                            list_items.append(f"- {li_text}")
+                                                    if list_items:
+                                                        section_content.append("\n".join(list_items))
+                                                else:
                                                     section_content.append(text)
-                                                    
-                                            # 移动到下一个元素
-                                            next_element = next_element.next_sibling
-                                            
-                                        # 添加到程序部分
-                                        if len(section_content) > 1:  # 确保有内容，不仅仅是标题
-                                            program_sections.append("\n\n".join(section_content))
+                                        
+                                        next_sibling = next_sibling.find_next_sibling()
+                                    
+                                    # 如果收集到有意义的内容，添加到部分列表
+                                    if len(section_content) > 1:
+                                        program_sections.append("\n\n".join(section_content))
+                            
+                            # 如果找到了有内容的部分，把它们合并为主内容
+                            if program_sections:
+                                extracted_content = "\n\n".join(program_sections)
+                                # 如果有内容但没有找到特定区域，使用所有提取的部分
+                                if not main_content or len(main_content.get_text(strip=True)) < len(extracted_content):
+                                    # 创建一个包含所有提取内容的临时元素
+                                    main_content = BeautifulSoup(f"<div>{extracted_content}</div>", 'html.parser').div
+                            
+                            # 5. 如果仍然没有找到有用内容，尝试从body提取所有重要段落
+                            if not main_content or len(main_content.get_text(strip=True)) < 300:
+                                important_paragraphs = []
                                 
-                                # 如果找到有意义的部分，使用它们
-                                if program_sections:
-                                    combined_text = "\n\n".join(program_sections)
-                                    # 创建一个临时的BeautifulSoup对象包含我们提取的内容
-                                    main_content = BeautifulSoup(f"<div>{combined_text}</div>", 'html.parser').find('div')
+                                # 获取所有段落
+                                for p in soup.find_all(['p', 'div', 'section']):
+                                    p_text = p.get_text(strip=True)
+                                    # 检查是否包含关键词且长度合适
+                                    if len(p_text) > 100 and any(keyword in p_text.lower() for keyword in program_keywords):
+                                        important_paragraphs.append(p_text)
+                                
+                                # 如果找到足够的段落，合并它们
+                                if len(important_paragraphs) > 2:
+                                    extracted_content = "\n\n".join(important_paragraphs)
+                                    main_content = BeautifulSoup(f"<div>{extracted_content}</div>", 'html.parser').div
                             
                             # 如果仍未找到特定的内容区域，使用整个body，但跳过导航和页脚
                             if not main_content:
                                 main_content = soup.body
                             
-                            # 提取有用的文本
-                            text = ""
+                            # 提取并格式化内容
+                            extracted_text = self._extract_formatted_content(main_content, program_keywords)
                             
-                            # 特别处理标题 - 确保按顺序获取
-                            heading_tags = ['h1', 'h2', 'h3', 'h4']
-                            for heading in main_content.find_all(heading_tags):
-                                heading_text = heading.get_text().strip()
-                                if heading_text:
-                                    # 添加标题格式
-                                    level = min(heading_tags.index(heading.name) + 1, 4)  # 确保最多4级标题
-                                    if level == 1:
-                                        text += "# " + heading_text + "\n\n"
-                                    else:
-                                        text += "#" * level + " " + heading_text + "\n\n"
+                            # 如果内容太短，可能没有提取到足够的信息
+                            if len(extracted_text) < 300:
+                                # 尝试再次从整个body提取，但只保留重要部分
+                                extracted_text = self._extract_formatted_content(soup.body, program_keywords)
                             
-                            # 查找程序相关的关键部分
-                            key_sections = ["Requirements", "Admission", "Application", "Program Structure", 
-                                          "Curriculum", "Course", "Fee", "Duration", "Overview"]
-                            
-                            # 尝试找到这些关键部分
-                            for section in key_sections:
-                                section_title_pattern = re.compile(f".*{section}.*", re.IGNORECASE)
+                            # 如果内容包含占位符，尝试查找更多信息
+                            if "(待补充" in extracted_text or "placeholder" in extracted_text.lower():
+                                # 搜索是否有详细信息
+                                detail_sections = []
+                                for heading in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+                                    heading_text = heading.get_text(strip=True).lower()
+                                    if any(detail_word in heading_text for detail_word in ['detail', 'more', 'information', 'about']):
+                                        detail_section = [f"# {heading.get_text(strip=True)}"]
+                                        current = heading.next_sibling
+                                        while current and current.name not in ['h1', 'h2', 'h3', 'h4']:
+                                            if hasattr(current, 'get_text'):
+                                                text = current.get_text(strip=True)
+                                                if text and len(text) > 50:
+                                                    detail_section.append(text)
+                                            current = current.next_sibling
+                                        if len(detail_section) > 1:
+                                            detail_sections.append("\n\n".join(detail_section))
                                 
-                                # 寻找包含这个部分的标题
-                                section_headings = main_content.find_all(['h1', 'h2', 'h3', 'h4'], 
-                                                                     string=section_title_pattern)
-                                
-                                for heading in section_headings:
-                                    # 获取标题文本
-                                    section_title = heading.get_text().strip()
-                                    
-                                    # 避免重复添加已经处理过的标题
-                                    if section_title in text:
-                                        continue
-                                    
-                                    # 找到这个标题后面的内容
-                                    section_content = []
-                                    
-                                    # 获取当前标题级别
-                                    heading_level = int(heading.name[1])
-                                    section_content.append("#" * heading_level + " " + section_title + "\n")
-                                    
-                                    # 获取后续内容直到下一个相同或更高级别的标题
-                                    next_element = heading.next_sibling
-                                    while next_element:
-                                        if (next_element.name and next_element.name[0] == 'h' and 
-                                            int(next_element.name[1]) <= heading_level):
-                                            break
-                                            
-                                        # 处理段落和列表
-                                        if next_element.name in ['p', 'li', 'div']:
-                                            para_text = next_element.get_text().strip()
-                                            if para_text:
-                                                section_content.append(para_text)
-                                                
-                                        # 处理表格
-                                        elif next_element.name == 'table':
-                                            table_text = "表格内容:\n"
-                                            for row in next_element.find_all('tr'):
-                                                row_data = [cell.get_text().strip() for cell in row.find_all(['th', 'td'])]
-                                                table_text += " | ".join(row_data) + "\n"
-                                            section_content.append(table_text)
-                                        
-                                        next_element = next_element.next_sibling
-                                    
-                                    # 如果找到了内容，添加到文本中
-                                    if len(section_content) > 1:
-                                        section_text = "\n\n".join(section_content)
-                                        text += section_text + "\n\n"
+                                # 添加找到的详细信息
+                                if detail_sections:
+                                    extracted_text += "\n\n## 附加信息\n\n" + "\n\n".join(detail_sections)
                             
-                            # 处理一般段落文本
-                            for para in main_content.find_all(['p', 'div']):
-                                # 跳过嵌套在其他已处理元素中的内容
-                                if para.find_parent(['p', 'li']) is not None:
-                                    continue
-                                    
-                                para_text = para.get_text().strip()
-                                if para_text and len(para_text) > 20:  # 忽略短文本
-                                    text += para_text + "\n\n"
-                            
-                            # 处理列表
-                            for list_elem in main_content.find_all(['ul', 'ol']):
-                                # 跳过已经作为其他元素的子元素处理过的列表
-                                if list_elem.find_parent(['li', 'p']) is not None:
-                                    continue
-                                    
-                                list_items = []
-                                for li in list_elem.find_all('li'):
-                                    li_text = li.get_text().strip()
-                                    if li_text:
-                                        list_items.append("- " + li_text)
-                                
-                                if list_items:
-                                    text += "\n".join(list_items) + "\n\n"
-                            
-                            # 尝试提取表格
-                            for table in main_content.find_all('table'):
-                                text += "表格内容:\n"
-                                for row in table.find_all('tr'):
-                                    row_data = [cell.get_text().strip() for cell in row.find_all(['th', 'td'])]
-                                    text += " | ".join(row_data) + "\n"
-                                text += "\n"
-                            
-                            # 提取重要链接
-                            links = []
-                            for link in main_content.find_all('a', href=True):
-                                link_text = link.get_text().strip()
-                                link_href = link['href']
-                                
-                                # 只收集有有意义文本描述的链接且可能是内部链接
-                                if (link_text and len(link_text) > 2 and 
-                                    not link_text.startswith(('http', 'www')) and
-                                    any(keyword in link_text.lower() for keyword in ['apply', 'admission', 'course', 'detail', 'more', 'program', 'requirement'])):
-                                    
-                                    # 将相对URL转换为绝对URL
-                                    if link_href.startswith('/'):
-                                        # 提取域名
-                                        domain = url.split('//')[0] + '//' + url.split('//')[1].split('/')[0]
-                                        link_href = domain + link_href
-                                    elif not link_href.startswith(('http://', 'https://')):
-                                        # 处理相对于当前页面的URL
-                                        base_url = '/'.join(url.split('/')[:-1]) + '/'
-                                        link_href = base_url + link_href
-                                    
-                                    links.append(f"- [{link_text}]({link_href})")
-                            
-                            # 添加链接部分
-                            if links:
-                                text += "\n## 相关链接\n\n" + "\n".join(links) + "\n\n"
-                            
-                            # 检查内容是否包含大学项目关键信息
-                            program_info_present = any(keyword in text.lower() for keyword in 
-                                                    ['admission', 'requirement', 'application', 'deadline', 
-                                                     'curriculum', 'course', 'program structure', 'fee', 
-                                                     'duration', 'degree', 'credit'])
-                            
-                            # 格式化最终文本
-                            if program_info_present:
-                                final_text = f"# {title}\n\n{text}\n\n来源: {url}"
-                            else:
-                                # 如果缺少关键项目信息，添加提示
-                                final_text = f"# {title}\n\n{text}\n\n**注意：本页面可能不包含完整的项目信息。建议访问 [{url}]({url}) 获取更多详细信息。**\n\n来源: {url}"
-                            
-                            # 如果文本太长，截断它
-                            if len(final_text) > 15000:
-                                final_text = final_text[:15000] + "...\n\n[内容过长已截断]"
-                            
+                            # 完成处理
                             scrape_progress.progress(100)
-                            scrape_status.success("内容抓取和解析成功")
+                            scrape_status.success("成功抓取并处理内容")
                             
-                            return final_text
+                            # 返回格式化的内容，并包含来源URL
+                            final_content = f"# {title}\n\n{extracted_text}\n\n来源: {url}"
+                            return final_content
                         
-                        except Exception as parse_error:
-                            # BeautifulSoup解析失败，回退到简单的正则表达式提取
-                            scrape_status.warning(f"HTML解析失败: {str(parse_error)}")
-                            
-                            # 简单提取纯文本（移除HTML标签）
-                            text_content = re.sub(r'<[^>]+>', ' ', html_content)
-                            text_content = re.sub(r'\s+', ' ', text_content).strip()
-                            
-                            # 限制文本长度
-                            if len(text_content) > 10000:
-                                text_content = text_content[:10000] + "...\n\n[内容过长已截断]"
-                            
+                        except Exception as parsing_error:
+                            # BeautifulSoup处理错误
                             scrape_progress.progress(100)
-                            scrape_status.success("内容使用简单方法提取成功")
-                            
-                            return f"# {title}\n\n{text_content}\n\n来源: {url}"
+                            scrape_status.error(f"解析HTML时出错: {str(parsing_error)}")
+                            with st.expander("错误详情", expanded=False):
+                                st.code(traceback.format_exc())
+                            return f"# 抓取错误\n\n解析 {url} 的内容时出错: {str(parsing_error)}\n\n请尝试直接访问网站查看内容。"
+                    
                     else:
                         # 非HTML内容
                         scrape_progress.progress(100)
-                        scrape_status.warning(f"非HTML内容: {content_type}")
-                        return f"# 无法提取内容\n\n该URL返回非HTML内容 (内容类型: {content_type})。\n\n来源: {url}"
+                        scrape_status.warning(f"URL返回非HTML内容: {content_type}")
+                        return f"# 非文本内容\n\nURL {url} 返回了非HTML内容 ({content_type})。请直接访问网站查看。"
+                
                 else:
-                    # 请求失败
+                    # 非200状态码
                     scrape_progress.progress(100)
-                    scrape_status.error(f"请求失败: {response.status_code}")
-                    return f"# 无法抓取内容\n\n请求URL失败，状态码: {response.status_code}\n\n来源: {url}"
+                    scrape_status.error(f"HTTP错误: {response.status_code}")
+                    return f"# 抓取错误\n\n访问 {url} 时返回HTTP错误 {response.status_code}。请稍后再试或直接访问网站。"
             
             except Exception as e:
-                # 处理所有其他错误
+                # 其他所有错误
                 scrape_progress.progress(100)
-                scrape_status.error(f"抓取出错: {str(e)}")
-                return f"# 抓取错误\n\n尝试抓取URL时发生错误: {str(e)}\n\n来源: {url}" 
+                scrape_status.error(f"抓取过程中发生异常: {str(e)}")
+                with st.expander("错误详情", expanded=False):
+                    st.code(traceback.format_exc())
+                return f"# 抓取错误\n\n处理 {url} 时发生异常: {str(e)}\n\n请尝试直接访问网站查看内容。"
+    
+    def _extract_formatted_content(self, element, keywords):
+        """
+        从HTML元素中提取格式化内容
+        
+        Args:
+            element: BeautifulSoup元素
+            keywords: 关键词列表用于识别重要内容
+            
+        Returns:
+            格式化的内容文本
+        """
+        if not element:
+            return ""
+        
+        from bs4 import BeautifulSoup
+        
+        # 提取有用的文本
+        text_parts = []
+        
+        # 特别处理标题，确保它们有正确的格式和层次
+        for level, tag in enumerate(['h1', 'h2', 'h3', 'h4', 'h5'], 1):
+            for heading in element.find_all(tag):
+                heading_text = heading.get_text().strip()
+                if heading_text:
+                    # 添加标题格式 (最多到三级标题)
+                    text_parts.append("\n" + "#" * min(level, 3) + " " + heading_text + "\n")
+        
+        # 处理列表 - 有序和无序
+        for list_element in element.find_all(['ul', 'ol']):
+            list_items = []
+            for li in list_element.find_all('li'):
+                li_text = li.get_text().strip()
+                if li_text:
+                    if list_element.name == 'ul':
+                        list_items.append("- " + li_text)
+                    else:
+                        list_items.append("1. " + li_text)  # 简化为统一的编号
+            
+            if list_items:
+                text_parts.append("\n" + "\n".join(list_items) + "\n")
+        
+        # 处理段落
+        for p in element.find_all('p'):
+            p_text = p.get_text().strip()
+            if p_text:
+                # 添加段落，确保段落之间有空行
+                text_parts.append(p_text)
+        
+        # 处理div - 通常包含段落或其他内容
+        for div in element.find_all('div'):
+            # 跳过已经处理过的元素
+            if div.find(['p', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5']):
+                continue
+                
+            div_text = div.get_text().strip()
+            # 只保留有意义的div内容
+            if div_text and len(div_text) > 50:
+                # 查找该div是否包含关键词，如果包含，给它更高优先级
+                has_keywords = any(keyword in div_text.lower() for keyword in keywords)
+                
+                if has_keywords:
+                    text_parts.insert(0, div_text)  # 放在前面
+                else:
+                    text_parts.append(div_text)
+        
+        # 处理表格
+        for table in element.find_all('table'):
+            # 添加表格标题
+            text_parts.append("\n### 表格信息\n")
+            
+            # 提取表格行
+            for row in table.find_all('tr'):
+                cells = []
+                for cell in row.find_all(['td', 'th']):
+                    cell_text = cell.get_text().strip().replace('\n', ' ')
+                    cells.append(cell_text)
+                
+                if cells:
+                    text_parts.append("| " + " | ".join(cells) + " |")
+            
+            text_parts.append("\n")
+        
+        # 合并所有内容，并进行清理
+        combined_text = "\n\n".join(text_parts)
+        
+        # 清理多余的空行和空格
+        cleaned_text = re.sub(r'\n{3,}', '\n\n', combined_text)
+        cleaned_text = re.sub(r' {2,}', ' ', cleaned_text)
+        
+        # 替换可能的占位符文本
+        final_text = cleaned_text.replace('(待补充)', '').replace('(待确认)', '')
+        
+        return final_text.strip()
