@@ -227,9 +227,10 @@ class SerperClient:
             scrape_status.info(f"正在抓取网页内容: {url}")
             
             try:
-                if not self.search_tool_name or self.search_tool_name != "scrape":
-                    scrape_status.error("未找到有效的抓取工具")
-                    return f"无法抓取 {url} 的内容：未找到有效的抓取工具"
+                # 检查是否有抓取工具或搜索工具可用
+                if not self.search_tool_name:
+                    scrape_status.error("未找到有效的抓取工具或搜索工具")
+                    return f"无法抓取 {url} 的内容：未找到有效的抓取工具或搜索工具"
                 
                 # 抓取逻辑
                 try:
@@ -241,21 +242,54 @@ class SerperClient:
                                 # 初始化会话
                                 await session.initialize()
                                 
-                                # 准备抓取参数
-                                args = {"url": url}
+                                # 准备参数和工具
+                                tool_name = self.search_tool_name
+                                args = None
                                 
-                                # 显示调用信息
-                                scrape_status.info(f"抓取网页: {url}")
+                                # 根据工具类型选择合适的参数
+                                if tool_name == "scrape":
+                                    # 使用专门的抓取工具
+                                    args = {"url": url}
+                                    scrape_status.info(f"使用scrape工具抓取网页: {url}")
+                                elif "search" in tool_name.lower() or tool_name in ["google_search", "serper", "serper-search"]:
+                                    # 使用搜索工具抓取特定URL的信息
+                                    search_query = f"site:{url}"
+                                    
+                                    if tool_name == "google_search":
+                                        args = {
+                                            "query": search_query,
+                                            "gl": "us",
+                                            "hl": "en",
+                                            "numResults": 1
+                                        }
+                                    else:
+                                        args = {"query": search_query}
+                                    
+                                    scrape_status.info(f"使用{tool_name}工具查询网页: {url}")
+                                else:
+                                    # 尝试使用其他工具
+                                    args = {"url": url}
+                                    scrape_status.info(f"尝试使用{tool_name}工具抓取网页: {url}")
                                 
                                 # 调用工具
-                                result = await session.call_tool("scrape", arguments=args)
+                                result = await session.call_tool(tool_name, arguments=args)
                                 
                                 # 处理结果
-                                scrape_status.success(f"成功抓取网页内容")
+                                scrape_status.success(f"成功获取网页内容")
                                 
                                 # 返回结果
-                                if hasattr(result, 'result') and isinstance(result.result, str):
-                                    return result.result
+                                if hasattr(result, 'result'):
+                                    if isinstance(result.result, str):
+                                        return result.result
+                                    elif isinstance(result.result, dict):
+                                        # 尝试从搜索结果中提取内容
+                                        if "organic" in result.result and len(result.result["organic"]) > 0:
+                                            return "标题: " + result.result["organic"][0].get("title", "") + "\n\n" + \
+                                                "描述: " + result.result["organic"][0].get("snippet", "")
+                                        else:
+                                            return json.dumps(result.result, ensure_ascii=False)
+                                    else:
+                                        return str(result.result)
                                 else:
                                     return "抓取结果格式不正确"
                 except Exception as e:
@@ -399,7 +433,7 @@ class SerperClient:
                                                     search_status.success(f"搜索成功，找到 {len(result.result['organic'])} 条结果")
                                                     
                                                     # 如果有scrape工具可用，尝试抓取前两个结果的页面内容
-                                                    if "scrape" in self.available_tools and len(result.result['organic']) > 0:
+                                                    if len(result.result['organic']) > 0:
                                                         search_status.info("正在抓取前两个搜索结果的页面内容...")
                                                         
                                                         try:
@@ -606,7 +640,7 @@ class SerperClient:
                 # 标准化结果格式
                 if "organic" in data:
                     # 如果有scrape工具可用，尝试抓取前两个结果的页面内容
-                    if "scrape" in self.available_tools and len(data['organic']) > 0:
+                    if len(data['organic']) > 0:
                         status_text.info("正在抓取前两个搜索结果的页面内容...")
                         
                         try:
@@ -647,7 +681,7 @@ class SerperClient:
                             })
                     
                     # 如果有scrape工具可用，尝试抓取前两个结果的页面内容
-                    if "scrape" in self.available_tools and len(formatted_results['organic']) > 0:
+                    if len(formatted_results['organic']) > 0:
                         status_text.info("正在抓取前两个搜索结果的页面内容...")
                         
                         try:
