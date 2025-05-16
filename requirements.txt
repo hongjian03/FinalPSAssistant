@@ -16,3 +16,4 @@ python-dotenv
 pydantic
 openai
 beautifulsoup4
+chardet
