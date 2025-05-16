@@ -66,11 +66,18 @@ class PSInfoCollector:
                     init_status.info("正在初始化MCP搜索服务...")
             
             # 尝试初始化Serper客户端，确保进度显示在search_setup_container中
-            initialized = await self.serper_client.initialize(main_container=search_setup_container)
-            
-            if not initialized:
+            try:
+                initialized = await self.serper_client.initialize(main_container=search_setup_container)
+                
+                if not initialized:
+                    with search_setup_container:
+                        st.error("无法初始化搜索服务。将使用基础知识生成信息。")
+                    return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
+            except Exception as e:
+                # 捕获所有可能的异常，确保程序不会终止
                 with search_setup_container:
-                    st.error("无法初始化搜索服务。将使用基础知识生成信息。")
+                    st.error(f"初始化搜索服务时出错: {str(e)}")
+                    st.warning("将使用基础知识生成院校信息。")
                 return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
             
             # 检查输入参数
@@ -89,20 +96,27 @@ class PSInfoCollector:
                 st.info(f"正在搜索: {search_query}")
             
             # 执行Web搜索，确保进度显示在search_setup_container中
-            search_results = await self.serper_client.search_web(search_query, main_container=search_setup_container)
-            
-            # 检查搜索结果是否包含错误
-            if "error" in search_results:
-                error_msg = search_results["error"]
+            try:
+                search_results = await self.serper_client.search_web(search_query, main_container=search_setup_container)
+                
+                # 检查搜索结果是否包含错误
+                if "error" in search_results:
+                    error_msg = search_results["error"]
+                    with search_setup_container:
+                        st.error(f"执行Web搜索时出错: {error_msg}")
+                        st.warning("搜索失败，将使用基础知识生成院校信息。请注意，此信息可能不是最新的。")
+                    return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
+                
+                # 检查搜索结果是否有效
+                if not search_results or "organic" not in search_results or not search_results["organic"]:
+                    with search_setup_container:
+                        st.warning(f"未找到关于{university}的{major}专业的搜索结果。将使用基础知识生成信息。")
+                    return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
+            except Exception as e:
+                # 捕获所有可能的搜索异常
                 with search_setup_container:
-                    st.error(f"执行Web搜索时出错: {error_msg}")
-                    st.warning("搜索失败，将使用基础知识生成院校信息。请注意，此信息可能不是最新的。")
-                return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
-            
-            # 检查搜索结果是否有效
-            if not search_results or "organic" not in search_results or not search_results["organic"]:
-                with search_setup_container:
-                    st.warning(f"未找到关于{university}的{major}专业的搜索结果。将使用基础知识生成信息。")
+                    st.error(f"搜索过程中出现错误: {str(e)}")
+                    st.warning("由于搜索错误，将使用基础知识生成院校信息。")
                 return self._generate_info_with_llm(university, major, custom_requirements, search_setup_container)
             
             # === 第4步：显示搜索结果（在第二个区域） ===
@@ -130,16 +144,28 @@ class PSInfoCollector:
                 report_progress.progress(30)
                 
                 # 调用OpenRouter API生成报告
-                report = self._call_openrouter_api(prompt, university, major)
-                
-                # 更新进度
-                report_progress.progress(100)
-                if not report.startswith("**错误："):
-                    report_status.success("院校信息报告生成成功")
-                else:
-                    report_status.error("院校信息报告生成失败")
-            
-            return report
+                try:
+                    report = self._call_openrouter_api(prompt, university, major)
+                    
+                    # 更新进度
+                    report_progress.progress(100)
+                    if not report.startswith("**错误："):
+                        report_status.success("院校信息报告生成成功")
+                    else:
+                        report_status.error("院校信息报告生成失败")
+                    
+                    return report
+                except Exception as e:
+                    # 处理API调用错误
+                    error_msg = f"**错误：生成报告时出错 - {str(e)}**"
+                    report_progress.progress(100)
+                    report_status.error("生成报告失败")
+                    
+                    with report_container:
+                        st.error(error_msg)
+                        st.warning("将使用基础知识生成院校信息。")
+                    
+                    return self._generate_info_with_llm(university, major, custom_requirements, report_container)
         
         except Exception as e:
             error_msg = f"**错误：收集院校信息时出错 - {str(e)}**"
