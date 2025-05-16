@@ -226,139 +226,169 @@ class SerperClient:
             scrape_status = st.empty()
             scrape_status.info(f"正在抓取网页内容: {url}")
             
-            try:
-                # 检查是否有抓取工具或搜索工具可用
-                if not self.search_tool_name:
-                    scrape_status.error("未找到有效的抓取工具或搜索工具")
-                    return f"无法抓取 {url} 的内容：未找到有效的抓取工具或搜索工具"
-                
-                # 尝试使用MCP抓取
+            # 检查是否有搜索工具可用
+            if not self.search_tool_name:
+                scrape_status.error("未找到有效的搜索工具")
+                return f"无法抓取 {url} 的内容：未找到有效的搜索工具"
+            
+            # 最大重试次数
+            max_retries = 3
+            current_retry = 0
+            
+            while current_retry < max_retries:
                 try:
-                    # 首先尝试使用MCP抓取
-                    return await self._mcp_scrape_url(url, scrape_status)
+                    # 使用不同的工具尝试抓取
+                    if current_retry == 0:
+                        # 第一次尝试：使用当前搜索工具
+                        tool_name = self.search_tool_name
+                        scrape_status.info(f"尝试使用 {tool_name} 抓取 (尝试 {current_retry+1}/{max_retries})")
+                    elif current_retry == 1:
+                        # 第二次尝试：使用"google_search"工具
+                        tool_name = "google_search"
+                        scrape_status.info(f"尝试使用备用方法 google_search 抓取 (尝试 {current_retry+1}/{max_retries})")
+                    else:
+                        # 第三次尝试：使用"serper"或"search"工具
+                        if "serper" in self.available_tools:
+                            tool_name = "serper"
+                        elif "search" in self.available_tools:
+                            tool_name = "search"
+                        else:
+                            tool_name = self.search_tool_name
+                        scrape_status.info(f"尝试使用备用方法 {tool_name} 抓取 (尝试 {current_retry+1}/{max_retries})")
+                    
+                    # 调用MCP抓取
+                    try:
+                        # 设置更短的超时时间避免长时间等待
+                        async with asyncio.timeout(25):
+                            # 使用streamable_http_client连接到服务器
+                            async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
+                                # 创建MCP会话
+                                async with mcp.ClientSession(read_stream, write_stream) as session:
+                                    # 初始化会话
+                                    await session.initialize()
+                                    
+                                    # 准备参数
+                                    args = None
+                                    
+                                    # 根据工具类型选择合适的参数
+                                    if tool_name == "scrape":
+                                        # 使用专门的抓取工具
+                                        args = {"url": url}
+                                        scrape_status.info(f"使用scrape工具抓取网页: {url}")
+                                    elif "search" in tool_name.lower() or tool_name in ["google_search", "serper", "serper-search"]:
+                                        # 使用搜索工具抓取特定URL的信息
+                                        # 根据URL构建更精确的搜索查询
+                                        domain = url.split('//')[-1].split('/')[0]
+                                        path = '/'.join(url.split('/')[3:]) if len(url.split('/')) > 3 else ""
+                                        search_query = f"site:{domain}"
+                                        
+                                        if path:
+                                            # 尝试提取页面关键词用于搜索
+                                            path_keywords = ' '.join(path.replace('-', ' ').replace('_', ' ').split('/'))
+                                            if len(path_keywords) > 0:
+                                                search_query += f" {path_keywords}"
+                                                
+                                        scrape_status.info(f"搜索查询: {search_query}")
+                                        
+                                        if tool_name == "google_search":
+                                            args = {
+                                                "query": search_query,
+                                                "gl": "us",
+                                                "hl": "en",
+                                                "numResults": 3
+                                            }
+                                        else:
+                                            args = {"query": search_query}
+                                        
+                                        scrape_status.info(f"使用{tool_name}工具查询网页内容")
+                                    else:
+                                        # 尝试使用其他工具
+                                        args = {"url": url}
+                                        scrape_status.info(f"尝试使用{tool_name}工具抓取网页")
+                                    
+                                    # 调用MCP工具
+                                    result = await session.call_tool(tool_name, arguments=args)
+                                    
+                                    # 处理结果
+                                    if hasattr(result, 'result'):
+                                        # 成功获取结果
+                                        scrape_status.success(f"MCP {tool_name} 成功获取内容")
+                                        
+                                        if isinstance(result.result, str):
+                                            return result.result
+                                        elif isinstance(result.result, dict):
+                                            # 从搜索结果中提取内容
+                                            if "organic" in result.result and len(result.result["organic"]) > 0:
+                                                # 合并前3个结果的内容
+                                                organic_results = result.result["organic"][:3]
+                                                combined_content = ""
+                                                
+                                                for i, item in enumerate(organic_results):
+                                                    title = item.get("title", f"结果 {i+1}")
+                                                    snippet = item.get("snippet", "")
+                                                    
+                                                    combined_content += f"## {title}\n\n{snippet}\n\n"
+                                                    
+                                                    # 添加链接信息
+                                                    if "link" in item:
+                                                        combined_content += f"链接: {item['link']}\n\n"
+                                                    
+                                                    # 添加分隔符
+                                                    if i < len(organic_results) - 1:
+                                                        combined_content += "---\n\n"
+                                                
+                                                return combined_content
+                                            else:
+                                                # 返回JSON格式的结果
+                                                return json.dumps(result.result, ensure_ascii=False, indent=2)
+                                        elif isinstance(result.result, list):
+                                            # 处理列表类型的结果
+                                            list_content = ""
+                                            for i, item in enumerate(result.result[:5]):  # 最多取前5项
+                                                if isinstance(item, dict):
+                                                    title = item.get("title", f"项目 {i+1}")
+                                                    content = item.get("content", item.get("snippet", item.get("description", "")))
+                                                    list_content += f"## {title}\n\n{content}\n\n"
+                                                else:
+                                                    list_content += f"## 项目 {i+1}\n\n{str(item)}\n\n"
+                                            
+                                            return list_content if list_content else "获取到列表结果，但内容为空"
+                                        else:
+                                            # 其他类型的结果转为字符串
+                                            return str(result.result)
+                                    else:
+                                        # 没有result属性
+                                        scrape_status.warning("MCP返回格式不正确")
+                                        return "MCP返回结果格式不正确，缺少result属性"
+                    except asyncio.TimeoutError:
+                        scrape_status.warning(f"MCP抓取超时 (尝试 {current_retry+1}/{max_retries})")
+                        current_retry += 1
+                        continue
+                    except Exception as mcp_error:
+                        error_msg = str(mcp_error)
+                        scrape_status.warning(f"MCP抓取出错: {error_msg[:100]}... (尝试 {current_retry+1}/{max_retries})")
+                        
+                        # 检查是否为TaskGroup错误，如果是则尝试其他工具
+                        if "TaskGroup" in error_msg or "asyncio" in error_msg:
+                            current_retry += 1
+                            continue
+                        else:
+                            raise mcp_error
+                
                 except Exception as e:
                     error_msg = str(e)
-                    scrape_status.warning(f"MCP抓取失败: {error_msg}")
+                    current_retry += 1
                     
-                    # 检查是否为TaskGroup错误
-                    if "TaskGroup" in error_msg or "asyncio" in error_msg:
-                        scrape_status.info("尝试使用备用方法抓取...")
-                        return await self._fallback_scrape_url(url, scrape_status)
-                    else:
-                        scrape_status.error(f"抓取过程中出错: {error_msg}")
-                        return f"抓取 {url} 失败: {error_msg}"
-            except Exception as e:
-                scrape_status.error(f"抓取设置出错: {str(e)}")
-                return f"抓取 {url} 失败: {str(e)}"
-    
-    async def _mcp_scrape_url(self, url: str, status_component) -> str:
-        """使用MCP服务抓取URL内容"""
-        try:
-            async with asyncio.timeout(20):  # 减少超时时间，避免长时间阻塞
-                # 使用streamable_http_client连接到服务器
-                async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
-                    # 创建MCP会话
-                    async with mcp.ClientSession(read_stream, write_stream) as session:
-                        # 初始化会话
-                        await session.initialize()
+                    # 如果是最后一次尝试且失败，显示错误
+                    if current_retry >= max_retries:
+                        scrape_status.error(f"抓取失败: {error_msg[:200]}")
                         
-                        # 准备参数和工具
-                        tool_name = self.search_tool_name
-                        args = None
-                        
-                        # 根据工具类型选择合适的参数
-                        if tool_name == "scrape":
-                            # 使用专门的抓取工具
-                            args = {"url": url}
-                            status_component.info(f"使用scrape工具抓取网页: {url}")
-                        elif "search" in tool_name.lower() or tool_name in ["google_search", "serper", "serper-search"]:
-                            # 使用搜索工具抓取特定URL的信息
-                            search_query = f"site:{url}"
-                            
-                            if tool_name == "google_search":
-                                args = {
-                                    "query": search_query,
-                                    "gl": "us",
-                                    "hl": "en",
-                                    "numResults": 1
-                                }
-                            else:
-                                args = {"query": search_query}
-                            
-                            status_component.info(f"使用{tool_name}工具查询网页: {url}")
-                        else:
-                            # 尝试使用其他工具
-                            args = {"url": url}
-                            status_component.info(f"尝试使用{tool_name}工具抓取网页: {url}")
-                        
-                        # 调用工具
-                        result = await session.call_tool(tool_name, arguments=args)
-                        
-                        # 处理结果
-                        status_component.success(f"成功获取网页内容")
-                        
-                        # 返回结果
-                        if hasattr(result, 'result'):
-                            if isinstance(result.result, str):
-                                return result.result
-                            elif isinstance(result.result, dict):
-                                # 尝试从搜索结果中提取内容
-                                if "organic" in result.result and len(result.result["organic"]) > 0:
-                                    return "标题: " + result.result["organic"][0].get("title", "") + "\n\n" + \
-                                        "描述: " + result.result["organic"][0].get("snippet", "")
-                                else:
-                                    return json.dumps(result.result, ensure_ascii=False)
-                            else:
-                                return str(result.result)
-                        else:
-                            return "抓取结果格式不正确"
-        except asyncio.TimeoutError:
-            status_component.warning("抓取操作超时")
-            raise Exception("抓取操作超时(20秒)")
-    
-    async def _fallback_scrape_url(self, url: str, status_component) -> str:
-        """使用备用方法抓取URL内容，不依赖MCP服务"""
-        try:
-            status_component.info(f"使用直接HTTP请求抓取: {url}")
+                        # 返回一个简单的错误消息和URL作为备用
+                        return f"无法通过MCP抓取 {url} 的内容。网页可能不存在或无法访问。\n建议访问网站手动查看内容。"
             
-            # 尝试直接使用HTTP请求获取页面内容
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1"
-            }
-            
-            # 使用超时设置发送HTTP请求
-            response = requests.get(url, headers=headers, timeout=15)
-            
-            # 检查响应状态
-            if response.status_code == 200:
-                # 尝试检测编码
-                response.encoding = response.apparent_encoding
-                
-                # 提取内容
-                content = response.text
-                
-                # 限制内容长度
-                if len(content) > 15000:
-                    content = content[:15000] + "...[内容过长已截断]"
-                
-                status_component.success("成功通过HTTP请求抓取网页内容")
-                return content
-            else:
-                status_component.warning(f"HTTP请求返回错误状态码: {response.status_code}")
-                
-                # 创建包含URL和状态码的简单描述
-                return f"无法抓取页面 {url}，状态码: {response.status_code}"
-                
-        except Exception as e:
-            error_msg = str(e)
-            status_component.error(f"备用抓取方法失败: {error_msg}")
-            
-            # 如果直接抓取也失败，返回URL信息
-            return f"无法使用任何方法抓取 {url} 的内容。错误: {error_msg}"
+            # 如果所有重试都失败，返回一个友好的错误信息
+            scrape_status.error("所有抓取方法都失败")
+            return f"无法抓取 {url} 的内容。请尝试直接访问网站。"
     
     async def search_web(self, query: str, main_container=None) -> Dict[str, Any]:
         """
