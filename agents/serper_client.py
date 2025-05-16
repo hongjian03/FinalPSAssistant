@@ -52,6 +52,9 @@ class SerperClient:
             
         # 所有UI元素都将在这个容器中创建，避免出现在侧边栏
         with main_container:
+            # 显示初始化标题
+            st.write("## MCP服务连接初始化")
+            
             # 检查API密钥
             if not self.serper_api_key or not self.smithery_api_key:
                 st.error("无法初始化: SERPER_API_KEY 或 SMITHERY_API_KEY 未设置。")
@@ -62,32 +65,48 @@ class SerperClient:
                 st.error(f"错误的URL格式: {self.url[:15]}...")
                 return False
             
-            # 创建标题和进度显示区域
-            st.write("## MCP连接进度")
+            # 创建诊断信息区域
+            with st.expander("MCP连接诊断信息", expanded=False):
+                st.caption("连接参数:")
+                st.code(f"服务器URL: {self.url.split('?')[0]}\nSerper API Key: {'已设置' if self.serper_api_key else '未设置'}\nSmithery API Key: {'已设置' if self.smithery_api_key else '未设置'}")
+                st.caption("当前环境信息:")
+                import platform
+                import sys
+                st.code(f"Python版本: {sys.version}\n操作系统: {platform.system()} {platform.version()}\nMCP客户端版本: {mcp.__version__ if hasattr(mcp, '__version__') else '未知'}")
+                
+                # 显示配置
+                st.caption("配置信息:")
+                import json
+                st.code(json.dumps(self.config, indent=2))
             
-            # 创建简单的进度条和状态文本，避免复杂的嵌套容器
+            # 创建简单的进度条和状态文本
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             try:
                 # 显示基本连接信息
                 status_text.info("开始初始化Serper MCP服务")
-                base_url = self.url.split("?")[0]
-                st.caption(f"连接到服务器: {base_url}")
                 
                 # 第一步：准备连接
                 progress_bar.progress(10)
                 status_text.info("正在检查连接参数...")
                 await asyncio.sleep(0.3)
                 
-                # 第二步：建立HTTP流连接
-                progress_bar.progress(30)
-                status_text.info("开始HTTP流式连接...")
+                # 创建临时全局错误日志
+                error_log_container = st.container()
+                with error_log_container:
+                    error_log = st.empty()
                 
+                # 使用异步超时机制防止连接卡住
                 try:
-                    async with asyncio.timeout(30):
+                    async with asyncio.timeout(40):  # 增加超时时间到40秒
+                        # 第二步：建立HTTP流连接
+                        progress_bar.progress(30)
+                        status_text.info("开始HTTP流式连接...")
+                        
+                        # 使用try-except分离不同阶段的错误
                         try:
-                            # 使用streamable_http_client连接到服务器
+                            # 尝试建立连接
                             async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
                                 progress_bar.progress(50)
                                 status_text.info("HTTP流式连接成功，创建MCP会话...")
@@ -110,7 +129,22 @@ class SerperClient:
                                         
                                         # 获取工具列表
                                         tools_result = await session.list_tools()
-                                        self.available_tools = [t.name for t in tools_result.tools]
+                                        
+                                        # 保存工具列表
+                                        if hasattr(tools_result, 'tools'):
+                                            self.available_tools = [t.name for t in tools_result.tools]
+                                            
+                                            # 在诊断区域显示所有工具
+                                            with st.expander("可用工具", expanded=False):
+                                                for tool in tools_result.tools:
+                                                    st.caption(f"工具: {tool.name}")
+                                                    if hasattr(tool, 'description'):
+                                                        st.caption(f"描述: {tool.description}")
+                                        else:
+                                            status_text.warning("无法获取工具列表，tools_result没有'tools'属性")
+                                            with st.expander("工具检查结果", expanded=True):
+                                                st.code(f"工具结果: {str(tools_result)}")
+                                            self.available_tools = []
                                         
                                         # 查找可用的搜索工具
                                         progress_bar.progress(90)
@@ -119,6 +153,7 @@ class SerperClient:
                                         # 可能的搜索工具名称
                                         search_tool_candidates = [
                                             "google_search",
+                                            "serper-google-search",
                                             "search", 
                                             "serper-search", 
                                             "web-search",
@@ -127,17 +162,26 @@ class SerperClient:
                                             "scrape"
                                         ]
                                         
+                                        # 显示工具选择过程
+                                        with st.expander("工具选择过程", expanded=False):
+                                            st.write("候选搜索工具:", search_tool_candidates)
+                                            st.write("可用工具:", self.available_tools)
+                                        
                                         # 尝试精确匹配
                                         for tool_name in search_tool_candidates:
                                             if tool_name in self.available_tools:
                                                 self.search_tool_name = tool_name
+                                                with st.expander("工具选择过程", expanded=False):
+                                                    st.success(f"精确匹配到搜索工具: {tool_name}")
                                                 break
                                         
                                         # 如果没找到精确匹配，尝试模糊匹配
                                         if not self.search_tool_name:
                                             for tool_name in self.available_tools:
-                                                if "search" in tool_name.lower():
+                                                if "search" in tool_name.lower() or "google" in tool_name.lower():
                                                     self.search_tool_name = tool_name
+                                                    with st.expander("工具选择过程", expanded=False):
+                                                        st.success(f"模糊匹配到搜索工具: {tool_name}")
                                                     break
                                         
                                         # 连接成功，更新UI
@@ -145,18 +189,16 @@ class SerperClient:
                                         
                                         if self.search_tool_name:
                                             status_text.success(f"MCP连接成功! 已选择搜索工具: {self.search_tool_name}")
-                                            st.success(f"可用工具: {', '.join(self.available_tools)}")
                                             return True
-                                        elif "scrape" in self.available_tools:
-                                            self.search_tool_name = "scrape"
-                                            status_text.warning("未找到搜索工具，将使用scrape工具作为替代")
-                                            st.success(f"可用工具: {', '.join(self.available_tools)}")
+                                        elif len(self.available_tools) > 0:
+                                            # 如果有任何工具可用，选择第一个
+                                            self.search_tool_name = self.available_tools[0]
+                                            status_text.warning(f"未找到专用搜索工具，将使用 {self.search_tool_name} 工具作为替代")
                                             return True
                                         else:
-                                            status_text.error("MCP连接成功，但未找到可用的搜索工具!")
-                                            st.warning(f"可用工具: {', '.join(self.available_tools)}")
+                                            status_text.error("MCP连接成功，但未找到任何可用工具!")
                                             return False
-                                            
+                                        
                                 except Exception as e:
                                     error_msg = str(e)
                                     error_type = type(e).__name__
@@ -164,18 +206,21 @@ class SerperClient:
                                     progress_bar.progress(100)
                                     if "TaskGroup" in error_msg:
                                         status_text.error("MCP会话异步任务组错误")
-                                        st.error(f"MCP会话出现TaskGroup错误，这可能是由于Python版本兼容性问题或MCP服务器内部错误。错误详情: {error_msg}")
+                                        error_log.error(f"会话错误详情: {error_msg}")
+                                        st.error(f"MCP会话出现TaskGroup错误，这可能是由于Python版本兼容性问题或MCP服务器内部错误。")
                                     else:
                                         status_text.error(f"MCP会话错误: {error_type}")
-                                        st.error(f"MCP会话错误: {error_msg}")
+                                        error_log.error(f"会话错误详情: {error_msg}")
                                     
                                     return False
+                                
                         except Exception as e:
                             error_msg = str(e)
                             error_type = type(e).__name__
                             
                             progress_bar.progress(100)
                             status_text.error(f"MCP连接失败: {error_type}")
+                            error_log.error(f"连接错误详情: {error_msg}")
                             
                             if "401" in error_msg:
                                 st.error("API密钥验证失败。请检查SMITHERY_API_KEY是否正确。")
@@ -184,15 +229,16 @@ class SerperClient:
                             elif "TaskGroup" in error_msg:
                                 st.error("MCP连接出现TaskGroup错误，这可能是由于Python版本兼容性问题。")
                             else:
-                                st.error(f"MCP连接失败: {error_msg}")
+                                st.error(f"MCP连接失败: {error_type}")
                             
                             return False
+                
                 except asyncio.TimeoutError:
                     progress_bar.progress(100)
-                    status_text.error("连接超时(30秒)")
-                    st.error("连接超时(30秒)。Serper MCP API服务器响应时间过长或不响应。")
+                    status_text.error("连接超时(40秒)")
+                    st.error("连接超时(40秒)。Serper MCP API服务器响应时间过长或不响应。")
                     return False
-                    
+            
             except Exception as e:
                 error_msg = str(e)
                 error_type = type(e).__name__
@@ -407,10 +453,11 @@ class SerperClient:
         
         # 所有UI元素都在这个容器内
         with main_container:
-            # 显示搜索标题和进度条
-            st.write(f"## 执行搜索: {query}")
+            # 显示搜索标题
+            st.write(f"## 搜索大学和专业信息")
+            st.write(f"查询: {query}")
             
-            # 直接创建进度条和状态文本，不使用多层嵌套
+            # 直接创建进度条和状态文本
             search_progress = st.progress(0)
             search_status = st.empty()
             search_status.info("准备搜索...")
@@ -431,101 +478,110 @@ class SerperClient:
                         "organic": [{"title": "空查询", "link": "", 
                         "snippet": "请提供有效的搜索查询。"}]}
             
+            # 创建错误日志区域
+            error_container = st.container()
+            with error_container:
+                error_log = st.empty()
+            
+            # 开始搜索流程
             try:
                 # 开始连接到服务器
-                search_progress.progress(20)
+                search_progress.progress(15)
                 search_status.info("建立MCP连接...")
-                await asyncio.sleep(0.3)
                 
-                # 实现重试逻辑
-                retry_count = 0
-                last_error = None
+                # 最大重试次数
+                max_retries = 2
+                current_retry = 0
                 
-                while retry_count < self.max_retries:
+                # 选择搜索工具和参数
+                primary_tool = self.search_tool_name
+                
+                # 重试循环
+                while current_retry <= max_retries:
+                    current_tool = primary_tool
+                    search_status.info(f"尝试 {current_retry+1}/{max_retries+1}: 使用 {current_tool} 工具搜索")
+                    
                     try:
-                        # 更新进度
-                        search_progress.progress(30)
-                        search_status.info("创建HTTP流式连接...")
-                        
-                        # 尝试连接
-                        try:
-                            async with asyncio.timeout(30):
-                                # 使用streamable_http_client连接到服务器
-                                async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
-                                    search_progress.progress(40)
-                                    search_status.info("创建MCP会话...")
-                                    await asyncio.sleep(0.3)
+                        # 使用异步超时防止卡住
+                        async with asyncio.timeout(35):  # 35秒超时
+                            # 使用streamable_http_client连接到服务器
+                            async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
+                                search_progress.progress(40)
+                                search_status.info("创建MCP会话...")
+                                
+                                # 创建MCP会话
+                                async with mcp.ClientSession(read_stream, write_stream) as session:
+                                    # 初始化会话
+                                    search_progress.progress(50)
+                                    search_status.info("初始化会话...")
+                                    await session.initialize()
                                     
-                                    # 创建MCP会话
-                                    async with mcp.ClientSession(read_stream, write_stream) as session:
-                                        # 初始化会话
-                                        search_progress.progress(50)
-                                        search_status.info("初始化会话...")
-                                        await asyncio.sleep(0.3)
+                                    # 执行搜索
+                                    search_progress.progress(70)
+                                    search_status.info(f"执行搜索: {query}")
+                                    
+                                    # 准备搜索参数
+                                    args = None
+                                    
+                                    # 根据工具名选择参数
+                                    if current_tool == "google_search" or current_tool == "serper-google-search":
+                                        args = {
+                                            "query": query,
+                                            "gl": "us",
+                                            "hl": "en",
+                                            "numResults": 5
+                                        }
+                                    elif current_tool == "search" or current_tool == "serper-search" or current_tool == "serper":
+                                        args = {"query": query}
+                                    elif current_tool == "scrape":
+                                        search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+                                        args = {"url": search_url}
+                                    else:
+                                        # 通用搜索参数
+                                        args = {"query": query}
+                                    
+                                    # 显示调用信息
+                                    search_status.info(f"调用 {current_tool} 工具，参数: {args}")
+                                    
+                                    # 尝试调用工具
+                                    try:
+                                        result = await session.call_tool(current_tool, arguments=args)
+                                    except Exception as tool_error:
+                                        error_msg = str(tool_error)
+                                        # 错误诊断和处理
+                                        with error_container:
+                                            st.write(f"⚠️ 工具调用错误: {error_msg[:200]}")
                                         
-                                        await session.initialize()
-                                        
-                                        # 执行搜索
-                                        search_progress.progress(70)
-                                        search_status.info(f"执行搜索: {query}")
-                                        await asyncio.sleep(0.3)
-                                        
-                                        # 准备搜索参数
-                                        tool_name = self.search_tool_name
-                                        args = None
-                                        
-                                        # 根据工具名选择参数
-                                        if tool_name == "google_search":
-                                            args = {
-                                                "query": query,
-                                                "gl": "us",
-                                                "hl": "en",
-                                                "numResults": 5
-                                            }
-                                        elif tool_name == "search" or tool_name == "serper-search" or tool_name == "serper":
-                                            args = {"query": query}
-                                        elif tool_name == "scrape":
-                                            search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-                                            args = {"url": search_url}
+                                        # 处理常见参数错误
+                                        if "query" in error_msg.lower() and "required" in error_msg.lower():
+                                            search_status.warning(f"参数错误，尝试添加额外参数")
+                                            # 添加额外参数再试
+                                            args = {"query": query, "gl": "us", "hl": "en"}
+                                            search_status.info(f"重试 {current_tool} 工具，参数: {args}")
+                                            result = await session.call_tool(current_tool, arguments=args)
                                         else:
-                                            args = {"query": query}
+                                            # 如果有其他错误，重试另一个工具
+                                            raise tool_error
+                                    
+                                    # 处理结果
+                                    search_progress.progress(90)
+                                    search_status.info("处理搜索结果...")
+                                    
+                                    # 成功获取结果
+                                    if hasattr(result, 'result'):
+                                        search_progress.progress(95)
                                         
-                                        # 显示调用信息
-                                        search_status.info(f"调用 {tool_name} 工具，参数: {args}")
-                                        
-                                        # 调用工具
-                                        try:
-                                            result = await session.call_tool(tool_name, arguments=args)
-                                        except Exception as tool_error:
-                                            error_msg = str(tool_error)
-                                            # 处理参数错误
-                                            if "query" in error_msg.lower() and "required" in error_msg.lower():
-                                                search_status.warning(f"参数错误，尝试添加gl和hl参数: {error_msg}")
-                                                # 添加额外参数再试
-                                                args["gl"] = "us"
-                                                args["hl"] = "en"
-                                                search_status.info(f"重试 {tool_name} 工具，参数: {args}")
-                                                result = await session.call_tool(tool_name, arguments=args)
-                                            else:
-                                                raise tool_error
-                                        
-                                        # 处理结果
-                                        search_progress.progress(90)
-                                        search_status.info("处理搜索结果...")
-                                        await asyncio.sleep(0.3)
-                                        
-                                        # 检查结果格式
-                                        if hasattr(result, 'result'):
-                                            search_progress.progress(95)
-                                            
+                                        # 根据结果类型处理
+                                        if isinstance(result.result, dict):
                                             # 标准搜索结果处理
-                                            if isinstance(result.result, dict):
-                                                if "organic" in result.result:
-                                                    search_status.success(f"搜索成功，找到 {len(result.result['organic'])} 条结果")
-                                                    
-                                                    # 如果有scrape工具可用，尝试抓取前两个结果的页面内容
-                                                    if len(result.result['organic']) > 0:
-                                                        search_status.info("正在抓取前两个搜索结果的页面内容...")
+                                            if "organic" in result.result:
+                                                search_status.success(f"搜索成功，找到 {len(result.result['organic'])} 条结果")
+                                                
+                                                # 尝试抓取前两个结果的页面内容
+                                                if len(result.result['organic']) > 0:
+                                                    # 创建单独的容器用于显示抓取进度
+                                                    with st.expander("网页内容抓取", expanded=False):
+                                                        st.info("正在抓取搜索结果的网页内容...")
                                                         
                                                         try:
                                                             # 最多抓取前两个结果
@@ -533,127 +589,187 @@ class SerperClient:
                                                             for i in range(pages_to_scrape):
                                                                 url = result.result['organic'][i].get('link', '')
                                                                 if url and url.startswith('http'):
-                                                                    search_status.info(f"抓取结果 {i+1}: {url}")
+                                                                    st.write(f"抓取结果 {i+1}: {url}")
+                                                                    
+                                                                    # 为抓取操作创建进度指示器
+                                                                    scrape_progress = st.progress(0)
                                                                     
                                                                     # 抓取页面内容
-                                                                    content = await self.scrape_url(url, main_container)
-                                                                    
-                                                                    # 将内容添加到搜索结果中
-                                                                    result.result['organic'][i]['page_content'] = content[:15000] if len(content) > 15000 else content
-                                                                    
-                                                            search_status.success(f"已抓取 {pages_to_scrape} 个搜索结果的详细内容")
+                                                                    try:
+                                                                        scrape_progress.progress(30)
+                                                                        content = await self.scrape_url(url, main_container)
+                                                                        scrape_progress.progress(100)
+                                                                        
+                                                                        # 预览内容片段
+                                                                        st.success(f"成功抓取页面 ({len(content)} 字符)")
+                                                                        preview = content[:500] + "..." if len(content) > 500 else content
+                                                                        st.caption("内容预览:")
+                                                                        st.code(preview)
+                                                                        
+                                                                        # 将内容添加到搜索结果中
+                                                                        result.result['organic'][i]['page_content'] = content
+                                                                    except Exception as scrape_error:
+                                                                        st.error(f"抓取错误: {str(scrape_error)[:200]}")
+                                                                        scrape_progress.progress(100)
+                                                            
+                                                            search_status.success(f"完成页面内容抓取")
                                                         except Exception as e:
-                                                            search_status.warning(f"抓取页面内容时出错: {str(e)}")
-                                                    
-                                                    # 返回结果
-                                                    search_progress.progress(100)
-                                                    return result.result
-                                            # 处理scrape工具的结果
-                                            elif self.search_tool_name == "scrape" and isinstance(result.result, str):
-                                                search_status.success("网页抓取成功")
+                                                            st.warning(f"抓取页面内容时出错: {str(e)[:200]}")
+                                                
+                                                # 搜索成功完成
+                                                search_progress.progress(100)
+                                                return result.result
+                                            
+                                            # 其他字典类型结果
+                                            else:
+                                                search_progress.progress(100)
+                                                search_status.success("搜索完成，返回结果")
                                                 return {
                                                     "organic": [
                                                         {
-                                                            "title": f"抓取结果: {query}",
-                                                            "link": f"https://www.google.com/search?q={query.replace(' ', '+')}",
-                                                            "snippet": result.result[:500] + "..." if len(result.result) > 500 else result.result
+                                                            "title": "搜索结果",
+                                                            "link": "",
+                                                            "snippet": f"搜索得到的JSON结果: {json.dumps(result.result, ensure_ascii=False)[:1000]}"
                                                         }
                                                     ]
                                                 }
-                                            else:
-                                                # 处理未知结果格式
-                                                search_status.warning("结果格式未知，尝试适配...")
                                                 
-                                                if isinstance(result.result, str):
-                                                    return {
-                                                        "organic": [
-                                                            {
-                                                                "title": f"搜索结果: {query}",
-                                                                "link": f"https://www.google.com/search?q={query.replace(' ', '+')}",
-                                                                "snippet": result.result[:500] + "..." if len(result.result) > 500 else result.result
-                                                            }
-                                                        ]
+                                        # 字符串类型结果
+                                        elif isinstance(result.result, str):
+                                            search_progress.progress(100)
+                                            search_status.success("搜索完成")
+                                            return {
+                                                "organic": [
+                                                    {
+                                                        "title": f"搜索结果: {query}",
+                                                        "link": f"https://www.google.com/search?q={query.replace(' ', '+')}",
+                                                        "snippet": result.result[:1000] + "..." if len(result.result) > 1000 else result.result,
+                                                        "page_content": result.result
                                                     }
-                                                elif isinstance(result.result, list):
-                                                    organic_results = []
-                                                    for i, item in enumerate(result.result):
-                                                        if isinstance(item, dict):
-                                                            organic_results.append({
-                                                                "title": item.get("title", f"结果 {i+1}"),
-                                                                "link": item.get("link", item.get("url", "")),
-                                                                "snippet": item.get("snippet", item.get("description", item.get("content", "无摘要")))
-                                                            })
-                                                    
-                                                    if organic_results:
-                                                        search_status.success(f"搜索成功，找到 {len(organic_results)} 条结果")
-                                                        return {"organic": organic_results}
+                                                ]
+                                            }
                                             
-                                            # 返回原始结果
-                                            return result.result
+                                        # 列表类型结果
+                                        elif isinstance(result.result, list):
+                                            organic_results = []
+                                            for i, item in enumerate(result.result):
+                                                if isinstance(item, dict):
+                                                    organic_results.append({
+                                                        "title": item.get("title", f"结果 {i+1}"),
+                                                        "link": item.get("link", item.get("url", "")),
+                                                        "snippet": item.get("snippet", item.get("description", item.get("content", "无摘要")))
+                                                    })
+                                                else:
+                                                    organic_results.append({
+                                                        "title": f"结果 {i+1}",
+                                                        "link": "",
+                                                        "snippet": str(item)
+                                                    })
+                                            
+                                            search_progress.progress(100)
+                                            if organic_results:
+                                                search_status.success(f"搜索成功，找到 {len(organic_results)} 条结果")
+                                                return {"organic": organic_results}
+                                            else:
+                                                search_status.warning("搜索结果为空列表")
+                                                return {"organic": [{"title": "空结果", "link": "", "snippet": "搜索未返回有效内容"}]}
+                                        
+                                        # 其他类型结果
                                         else:
                                             search_progress.progress(100)
-                                            search_status.error("搜索结果格式不正确")
-                                            return {"error": "搜索结果格式不正确，缺少result属性", 
-                                                "organic": [{"title": "无效结果格式", "link": "", 
-                                                "snippet": "服务器返回的结果格式无效，缺少result属性。"}]}
-                        except asyncio.TimeoutError:
-                            search_progress.progress(100)
-                            search_status.error("搜索操作超时(30秒)")
-                            raise asyncio.TimeoutError("搜索操作超时(30秒)")
-                        
-                        # 如果到这里，搜索成功，跳出重试循环
-                        break
-                    except Exception as e:
-                        retry_count += 1
-                        last_error = e
-                        error_msg = str(e)
-                        
-                        # 检查是否为TaskGroup错误
-                        if "TaskGroup" in error_msg:
-                            search_status.warning("检测到TaskGroup错误，使用备用搜索方法...")
-                            return await self._fallback_search(query, search_progress, search_status)
-                        
-                        # 显示重试信息
-                        search_status.warning(f"搜索尝试 {retry_count}/{self.max_retries} 失败，正在重试...")
-                        await asyncio.sleep(1)
-                
-                # 如果重试后仍有错误
-                if retry_count >= self.max_retries and last_error:
-                    search_progress.progress(100)
+                                            search_status.success("搜索完成，返回非标准格式结果")
+                                            return {
+                                                "organic": [
+                                                    {
+                                                        "title": f"搜索结果: {query}",
+                                                        "link": "",
+                                                        "snippet": f"类型: {type(result.result).__name__}, 内容: {str(result.result)[:1000]}"
+                                                    }
+                                                ]
+                                            }
+                                    
+                                    # 结果格式不符合预期
+                                    else:
+                                        search_progress.progress(100)
+                                        search_status.error("搜索结果格式不正确")
+                                        with error_container:
+                                            st.write(f"⚠️ 结果格式异常: {str(result)[:200]}")
+                                        return {"error": "搜索结果格式不正确，缺少result属性", 
+                                                "organic": [{"title": "无效结果格式", "link": "", "snippet": "服务器返回的结果格式无效"}]}
                     
-                    if isinstance(last_error, asyncio.TimeoutError):
-                        search_status.error("搜索操作多次尝试后仍然超时")
-                        return {"error": "搜索操作超时，服务器响应时间过长",
-                                "organic": [{"title": f"搜索超时: {query}", "link": "", 
-                                "snippet": "多次尝试后仍然无法获取搜索结果，服务器响应时间过长。"}]}
-                    else:
-                        error_msg = str(last_error)
+                    except asyncio.TimeoutError:
+                        search_progress.progress(100)
+                        search_status.warning(f"搜索操作超时 (尝试 {current_retry+1}/{max_retries+1})")
+                        current_retry += 1
                         
-                        # 如果是TaskGroup错误，使用备用搜索
-                        if "TaskGroup" in error_msg:
-                            search_status.warning("多次尝试后仍出现TaskGroup错误，使用备用搜索方法...")
+                        # 如果还有重试机会，尝试其他工具
+                        if current_retry <= max_retries:
+                            # 尝试备用搜索工具
+                            if primary_tool == "google_search" and "serper" in self.available_tools:
+                                primary_tool = "serper"
+                            elif primary_tool != "google_search" and "google_search" in self.available_tools:
+                                primary_tool = "google_search"
+                            else:
+                                # 尝试任何其他工具
+                                other_tools = [t for t in self.available_tools if t != primary_tool]
+                                if other_tools:
+                                    primary_tool = other_tools[0]
+                        else:
+                            # 最后一次尝试失败，返回错误
+                            return {
+                                "error": "搜索操作多次尝试后仍然超时",
+                                "organic": [{"title": f"搜索超时: {query}", "link": "", "snippet": "无法获取搜索结果，服务器响应时间过长"}]
+                            }
+                    
+                    except Exception as e:
+                        error_msg = str(e)
+                        error_type = type(e).__name__
+                        
+                        # 记录错误日志
+                        with error_container:
+                            st.write(f"⚠️ 错误: {error_type} - {error_msg[:200]}")
+                        
+                        # 尝试切换搜索工具
+                        current_retry += 1
+                        search_status.warning(f"搜索错误: {error_type} (尝试 {current_retry}/{max_retries+1})")
+                        
+                        # 如果还有重试机会，尝试其他工具
+                        if current_retry <= max_retries:
+                            # 尝试备用搜索工具
+                            if "TaskGroup" in error_msg:
+                                search_status.info("检测到TaskGroup错误，尝试其他搜索工具")
+                            
+                            if primary_tool == "google_search" and "serper" in self.available_tools:
+                                primary_tool = "serper"
+                            elif primary_tool != "google_search" and "google_search" in self.available_tools:
+                                primary_tool = "google_search"
+                            else:
+                                # 尝试任何其他工具
+                                other_tools = [t for t in self.available_tools if t != primary_tool]
+                                if other_tools:
+                                    primary_tool = other_tools[0]
+                        else:
+                            # 最后一次尝试也失败，使用Serper API作为备用方法
+                            search_status.info("所有MCP尝试都失败，使用备用搜索方法")
                             return await self._fallback_search(query, search_progress, search_status)
-                        
-                        # 其他错误
-                        search_status.error(f"多次尝试后仍然出错: {type(last_error).__name__}")
-                        return {"error": f"多次尝试后搜索仍然失败: {error_msg}",
-                                "organic": [{"title": f"搜索错误: {query}", "link": "", 
-                                "snippet": f"多次尝试后搜索仍然失败。错误详情: {error_msg[:200]}..."}]}
+                
+                # 如果所有重试都失败（不太可能到达这里，但以防万一）
+                search_progress.progress(100)
+                search_status.error("所有搜索尝试均失败")
+                return {"error": "无法完成搜索请求", 
+                        "organic": [{"title": "搜索失败", "link": "", "snippet": "多次尝试后仍然无法获取搜索结果"}]}
             
             except Exception as e:
-                # 捕获所有其他异常
-                error_msg = str(e)
+                # 所有其他未捕获的异常
                 search_progress.progress(100)
+                search_status.error(f"搜索过程中发生意外错误: {type(e).__name__}")
                 
-                # 如果是TaskGroup错误，使用备用搜索
-                if "TaskGroup" in error_msg:
-                    search_status.warning("执行Web搜索时出现TaskGroup错误，使用备用搜索方法...")
-                    return await self._fallback_search(query, search_progress, search_status)
-                else:
-                    search_status.error(f"执行Web搜索时出错: {error_msg}")
-                    return {"error": f"执行Web搜索时出错: {error_msg}", 
-                            "organic": [{"title": "搜索系统错误", "link": "", 
-                            "snippet": f"执行搜索时遇到系统错误: {error_msg[:200]}..."}]}
+                # 记录错误详情
+                with error_container:
+                    st.error(f"意外错误: {str(e)[:500]}")
+                
+                # 使用备用搜索方法
+                return await self._fallback_search(query, search_progress, search_status)
     
     async def _fallback_search(self, query: str, progress_bar=None, status_text=None) -> Dict[str, Any]:
         """
