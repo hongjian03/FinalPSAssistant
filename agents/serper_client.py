@@ -94,6 +94,11 @@ class SerperClient:
         self.scrape_tool_name = None
         # Maximum retries for connection issues
         self.max_retries = 3
+        
+        # 添加缓存
+        self.search_cache = {}  # 搜索结果缓存
+        self.scrape_cache = {}  # 网页内容抓取缓存
+        self.cache_enabled = True  # 是否启用缓存
     
     async def initialize(self, main_container=None):
         """Initialize the connection to the MCP server and get available tools."""
@@ -553,10 +558,18 @@ class SerperClient:
         Returns:
             Dictionary containing search results
         """
+        # 检查缓存
+        if self.cache_enabled and query in self.search_cache:
+            # 如果提供了容器，显示缓存命中信息
+            if main_container:
+                with main_container:
+                    st.success(f"使用缓存结果: {query}")
+            return self.search_cache[query]
+            
         # 如果没有提供容器，创建一个新的
         if main_container is None:
             main_container = st.container()
-        
+    
         # 所有UI元素都在这个容器内
         with main_container:
             # 显示搜索标题
@@ -575,7 +588,7 @@ class SerperClient:
             return await self._fallback_search(query, search_progress, search_status)
         
         # 尝试次数和当前尝试
-        max_retries = 4  # 增加重试次数
+        max_retries = 2  # 减少重试次数，原为4次
         current_retry = 0
         last_error = None
         
@@ -584,11 +597,11 @@ class SerperClient:
             # 尝试使用MCP进行搜索
             with main_container:
                 search_progress.progress(20 + current_retry * 5)
-                search_status.info(f"初始化MCP搜索工具... (尝试 {current_retry+1}/{max_retries})")
+                search_status.info(f"初始化搜索工具... (尝试 {current_retry+1}/{max_retries})")
             
             try:
                 # 设置较长的超时时间
-                async with asyncio.timeout(40):  # 增加超时时间
+                async with asyncio.timeout(20):  # 减少超时时间，原为40秒
                     # 使用streamable_http_client连接到服务器
                     async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
                         with main_container:
@@ -649,13 +662,17 @@ class SerperClient:
                                             # 标准化结果格式
                                             formatted_results = self._standardize_mcp_results(result.result, query)
                                             
-                                            # 额外处理：抓取大学网站结果
-                                            formatted_results = await self._enrich_university_results(formatted_results, search_progress, search_status, main_container)
+                                            # 禁用额外处理以提高速度
+                                            # formatted_results = await self._enrich_university_results(formatted_results, search_progress, search_status, main_container)
                                             
                                             with main_container:
                                                 search_progress.progress(100)
                                                 result_count = len(formatted_results.get('organic', []))
                                                 search_status.success(f"搜索成功，找到 {result_count} 条结果")
+                                            
+                                            # 如果搜索成功，将结果存入缓存
+                                            if self.cache_enabled:
+                                                self.search_cache[query] = formatted_results
                                             
                                             return formatted_results
                                         else:
@@ -667,8 +684,8 @@ class SerperClient:
                                             # 尝试将结果转换为标准格式
                                             results = self._convert_to_standard_format(result.result, query)
                                             
-                                            # 额外处理：抓取大学网站结果
-                                            results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                                            # 禁用额外处理以提高速度
+                                            # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
                                             
                                             return results
                                     else:
@@ -734,8 +751,12 @@ class SerperClient:
                                         search_status.warning("多次尝试工具调用均超时，切换到备用方法")
                                     results = await self._fallback_search(query, search_progress, search_status)
                                     
-                                    # 额外处理：抓取大学网站结果
-                                    results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                                    # 禁用额外处理以提高速度
+                                    # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                                    
+                                    # 如果搜索成功，将结果存入缓存
+                                    if self.cache_enabled:
+                                        self.search_cache[query] = results
                                     
                                     return results
                             except Exception as tool_error:
@@ -762,14 +783,18 @@ class SerperClient:
                                             search_status.warning("多次尝试均出现TaskGroup错误，切换到备用方法")
                                         results = await self._fallback_search(query, search_progress, search_status)
                                         
-                                        # 额外处理：抓取大学网站结果
-                                        results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                                        # 禁用额外处理以提高速度
+                                        # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                                        
+                                        # 如果搜索成功，将结果存入缓存
+                                        if self.cache_enabled:
+                                            self.search_cache[query] = results
                                         
                                         return results
                                 # 检查是否是搜索参数错误
                                 elif "query" in error_msg.lower() and "required" in error_msg.lower():
                                     with main_container:
-                                        search_status.warning(f"搜索参数错误: {error_msg[:100]}")
+                                        search_status.info(f"搜索参数调整中: {error_msg[:100]} (这是正常流程，请稍候...)")
                                     
                                     # 尝试使用更简单的参数重试
                                     if current_retry < max_retries - 1:
@@ -791,11 +816,6 @@ class SerperClient:
                                         
                                         await asyncio.sleep(1)
                                         continue
-                                    else:
-                                        # 切换到备用方法
-                                        results = await self._fallback_search(query, search_progress, search_status)
-                                        results = await self._enrich_university_results(results, search_progress, search_status, main_container)
-                                        return results
                                 else:
                                     # 其他错误，记录详情并重试
                                     with main_container:
@@ -811,8 +831,12 @@ class SerperClient:
                                         # 最后一次尝试也失败，切换到备用方法
                                         results = await self._fallback_search(query, search_progress, search_status)
                                         
-                                        # 额外处理：抓取大学网站结果
-                                        results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                                        # 禁用额外处理以提高速度
+                                        # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                                        
+                                        # 如果搜索成功，将结果存入缓存
+                                        if self.cache_enabled:
+                                            self.search_cache[query] = results
                                         
                                         return results
             
@@ -835,8 +859,12 @@ class SerperClient:
                         search_status.warning("多次连接均超时，使用备用搜索")
                     results = await self._fallback_search(query, search_progress, search_status)
                     
-                    # 额外处理：抓取大学网站结果
-                    results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                    # 禁用额外处理以提高速度
+                    # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
+                    
+                    # 如果搜索成功，将结果存入缓存
+                    if self.cache_enabled:
+                        self.search_cache[query] = results
                     
                     return results
             except Exception as e:
@@ -1971,9 +1999,17 @@ class SerperClient:
         Returns:
             抓取的内容
         """
+        # 检查缓存
+        if self.cache_enabled and url in self.scrape_cache:
+            # 如果提供了容器，显示缓存命中信息
+            if main_container:
+                with main_container:
+                    st.success(f"使用缓存内容: {url}")
+            return self.scrape_cache[url]
+            
         if main_container is None:
             main_container = st.container()
-        
+            
         with main_container:
             scrape_status = st.empty()
             scrape_progress = st.progress(0)
@@ -1985,13 +2021,13 @@ class SerperClient:
                 
                 # 从配置中获取Jina Reader设置
                 jina_base_url = JINA_CONFIG["base_url"]
-                request_timeout = JINA_CONFIG["request"]["timeout"]
-                max_retries = JINA_CONFIG["request"]["max_retries"]
+                request_timeout = 12  # 缩短超时时间，原为25秒
+                max_retries = 1  # 减少重试次数，原为2次
                 headers = JINA_CONFIG["request"]["headers"]
                 
                 # 构建Jina Reader URL
                 jina_url = f"{jina_base_url}{url}"
-                scrape_status.info(f"通过Jina Reader API抓取: {jina_url}")
+                scrape_status.info(f"抓取网页中，请稍候...")
                 
                 # 使用较短的超时发送请求
                 current_retry = 0
@@ -1999,7 +2035,6 @@ class SerperClient:
                 
                 while current_retry <= max_retries:
                     try:
-                        scrape_status.info(f"发送Jina Reader请求 (尝试 {current_retry+1}/{max_retries+1})...")
                         scrape_progress.progress(50 + current_retry * 10)
                         
                         # 使用aiohttp进行异步请求
@@ -2007,11 +2042,19 @@ class SerperClient:
                             async with session.get(jina_url, headers=headers, timeout=request_timeout) as response:
                                 if response.status == 200:
                                     content = await response.text()
-                                    scrape_status.success("成功通过Jina Reader抓取内容")
+                                    scrape_status.success("成功抓取内容")
                                     scrape_progress.progress(100)
+                                    
+                                    # 限制内容长度，避免过长内容处理
+                                    if len(content) > 30000:
+                                        content = content[:30000] + "\n\n...(内容已截断)..."
+                                        scrape_status.info("内容过长，已截断")
                                     
                                     # 返回抓取的内容
                                     if content:
+                                        # 保存到缓存
+                                        if self.cache_enabled:
+                                            self.scrape_cache[url] = content
                                         return content
                                     else:
                                         raise Exception("抓取结果为空")
