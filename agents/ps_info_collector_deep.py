@@ -12,13 +12,22 @@ class PSInfoCollectorDeep:
     """
     Agent 1.2: 针对1.1报告缺失项，抓取指定URL补全信息，只补全缺失项，不修改已确认内容。
     """
-    def __init__(self, model_name=None):
+    def __init__(self, model_name=None, max_urls_to_process=3):
+        """
+        初始化Agent 1.2
+        
+        Args:
+            model_name: 要使用的AI模型名称
+            max_urls_to_process: 最多处理的补充URL数量（默认为3）
+        """
         self.model_name = model_name if model_name else "anthropic/claude-3-7-sonnet"
         self.api_key = st.secrets.get("OPENROUTER_API_KEY", "")
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.serper_client = SerperClient()
         # 加载提示词配置
         self.prompts = load_prompts().get("ps_info_collector_deep", {})
+        # 最大处理URL数量限制
+        self.max_urls_to_process = max_urls_to_process
 
     async def complete_missing_info(self, main_report: str, missing_fields: List[str], urls_for_deep: List[str], university: str, major: str, custom_requirements: str = "", progress_callback: Optional[Callable[[int, str], None]] = None) -> str:
         """
@@ -43,6 +52,9 @@ class PSInfoCollectorDeep:
                 if progress_callback:
                     progress_callback(100, "Agent 1.2：无需补全信息")
                 return main_report
+            
+            # 限制处理的URL数量
+            urls_for_deep = urls_for_deep[:self.max_urls_to_process]
             
             st.info(f"需要补全的信息: {', '.join(missing_fields)}")
             st.info(f"将抓取 {len(urls_for_deep)} 个补充页面")
