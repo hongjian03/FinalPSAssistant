@@ -87,13 +87,18 @@ class PSInfoCollectorMain:
             main_content = ""
             if main_url:
                 try:
-                    # 调用有main_container参数的那个scrape_url方法
-                    main_content = await self.serper_client.scrape_url(main_url, main_container=search_container)
-                except TypeError as e:
-                    # 如果遇到参数错误，尝试不带参数调用
+                    # 使用jina_reader_scrape替代scrape_url
+                    main_content = await self.serper_client.jina_reader_scrape(main_url, main_container=search_container)
+                except Exception as e:
+                    # 如果Jina Reader失败，尝试直接抓取
                     with search_container:
-                        st.warning(f"抓取方法参数错误: {str(e)}，尝试不带main_container参数调用")
-                    main_content = await self.serper_client.scrape_url(main_url)
+                        st.warning(f"Jina Reader抓取失败: {str(e)}，尝试直接抓取")
+                    try:
+                        main_content = await self.serper_client.direct_scrape(main_url, main_container=search_container)
+                    except Exception as direct_error:
+                        with search_container:
+                            st.error(f"所有抓取方法均失败: {str(direct_error)}")
+                
                 if not main_content:
                     with search_container:
                         st.warning("主网页内容为空，将使用搜索结果摘要")
