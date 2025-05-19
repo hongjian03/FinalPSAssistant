@@ -162,15 +162,11 @@ class PSInfoCollectorDeep:
         task = self.prompts.get("task", "分析抓取的补充页面，提取主报告中缺失的信息，生成可直接合并的补充内容。")
         output_format = self.prompts.get("output", "为每个缺失项生成一个单独的补充内容块，格式清晰规范。")
         
-        # 合并所有抓取内容（限制长度）
+        # 合并所有抓取内容（不限制长度）
         all_content = ""
         for url, content in scraped_contents.items():
-            # 取每个内容的前5000字符
-            content_preview = content[:5000] if content else "内容为空"
-            all_content += f"\n--- 页面: {url} ---\n{content_preview}\n\n"
-        
-        # 限制总内容长度，避免超出token上限
-        all_content = all_content[:15000]
+            # 不再限制内容长度
+            all_content += f"\n--- 页面: {url} ---\n{content}\n\n"
         
         # 从主报告中提取已有结构
         report_structure = self._extract_report_structure(main_report)
