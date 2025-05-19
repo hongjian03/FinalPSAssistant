@@ -1847,12 +1847,7 @@ class SerperClient:
                                     scrape_status.success("成功抓取内容")
                                     scrape_progress.progress(100)
                                     
-                                    # 限制内容长度，避免过长内容处理
-                                    if len(content) > 30000:
-                                        content = content[:30000] + "\n\n...(内容已截断)..."
-                                        scrape_status.info("内容过长，已截断")
-                                    
-                                    # 返回抓取的内容
+                                    # 移除内容长度限制，保留完整内容
                                     if content:
                                         # 保存到缓存
                                         if self.cache_enabled:
