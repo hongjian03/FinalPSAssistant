@@ -4,7 +4,7 @@ import asyncio
 import requests
 import json
 import traceback
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from .serper_client import SerperClient
 from config.prompts import load_prompts
 
@@ -20,9 +20,18 @@ class PSInfoCollectorDeep:
         # 加载提示词配置
         self.prompts = load_prompts().get("ps_info_collector_deep", {})
 
-    async def complete_missing_info(self, main_report: str, missing_fields: List[str], urls_for_deep: List[str], university: str, major: str, custom_requirements: str = "") -> str:
+    async def complete_missing_info(self, main_report: str, missing_fields: List[str], urls_for_deep: List[str], university: str, major: str, custom_requirements: str = "", progress_callback: Optional[Callable[[int, str], None]] = None) -> str:
         """
         针对缺失项，抓取指定URL补全，合成最终报告。
+        
+        Args:
+            main_report: 主报告内容
+            missing_fields: 缺失项列表
+            urls_for_deep: 需要抓取的补充URL列表
+            university: 大学名称
+            major: 专业名称
+            custom_requirements: 自定义需求
+            progress_callback: 可选的进度回调函数，用于更新UI进度条
         """
         deep_container = st.container()
         
@@ -31,10 +40,15 @@ class PSInfoCollectorDeep:
             
             if not missing_fields or not urls_for_deep:
                 st.success("无需补全信息，主报告已完整")
+                if progress_callback:
+                    progress_callback(100, "Agent 1.2：无需补全信息")
                 return main_report
             
             st.info(f"需要补全的信息: {', '.join(missing_fields)}")
             st.info(f"将抓取 {len(urls_for_deep)} 个补充页面")
+            
+            if progress_callback:
+                progress_callback(15, "Agent 1.2：准备抓取补充页面...")
         
         try:
             # 抓取所有补充页面内容
@@ -42,6 +56,11 @@ class PSInfoCollectorDeep:
             for i, url in enumerate(urls_for_deep):
                 with deep_container:
                     st.write(f"正在抓取第 {i+1}/{len(urls_for_deep)} 个页面: {url}")
+                
+                # 更新进度条，抓取部分占40%的进度
+                if progress_callback:
+                    progress_percent = 15 + int(((i+1) / len(urls_for_deep)) * 40)
+                    progress_callback(progress_percent, f"Agent 1.2：抓取第 {i+1}/{len(urls_for_deep)} 个页面...")
                 
                 content = await self.serper_client.scrape_url(url, main_container=deep_container)
                 if content:
@@ -56,9 +75,14 @@ class PSInfoCollectorDeep:
             if not scraped_contents:
                 with deep_container:
                     st.error("所有补充页面抓取失败，将使用原报告")
+                if progress_callback:
+                    progress_callback(100, "Agent 1.2：抓取失败，使用原报告")
                 return main_report
             
             # 使用LLM分析抓取内容，针对缺失项生成补充内容
+            if progress_callback:
+                progress_callback(60, "Agent 1.2：分析补充页面内容...")
+                
             supplementary_info = await self._analyze_scraped_content(
                 main_report=main_report,
                 missing_fields=missing_fields,
@@ -69,6 +93,9 @@ class PSInfoCollectorDeep:
             )
             
             # 合成最终报告
+            if progress_callback:
+                progress_callback(85, "Agent 1.2：合成最终报告...")
+                
             final_report = self._merge_report(main_report, supplementary_info)
             
             with deep_container:
@@ -85,6 +112,9 @@ class PSInfoCollectorDeep:
                 with st.expander("最终报告预览", expanded=False):
                     st.markdown(final_report)
             
+            if progress_callback:
+                progress_callback(95, "Agent 1.2：准备完成...")
+            
             return final_report
             
         except Exception as e:
@@ -93,6 +123,8 @@ class PSInfoCollectorDeep:
                 st.code(traceback.format_exc())
             
             # 出错时返回原报告
+            if progress_callback:
+                progress_callback(100, "Agent 1.2：执行出错，使用原报告")
             return main_report
 
     async def _analyze_scraped_content(self, main_report: str, missing_fields: List[str], scraped_contents: Dict[str, str], university: str, major: str, deep_container=None) -> Dict[str, str]:
