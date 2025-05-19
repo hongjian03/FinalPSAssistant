@@ -225,7 +225,7 @@ class PSInfoCollectorMain:
         网页来源: {main_url}
         
         # 网页内容
-        {content[:15000]}  # 限制内容长度，避免超出token限制
+        {content}  # 不限制内容长度，保留完整内容
         
         # 分析要求
         请仔细分析上述内容，提取以下几个方面的信息：
