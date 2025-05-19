@@ -615,21 +615,18 @@ class SerperClient:
                                     "numResults": 8 # 结果数量
                                 }
                             else:
-                                # 通用搜索工具格式
+                                # 通用搜索工具格式 - 确保同时包含所有可能的参数命名方式
                                 args = {
                                     "query": query,
-                                    "region_code": "us", # 确保有区域代码
-                                    "language": "en"    # 确保有语言设置
+                                    "q": query,                 # 备用查询参数名
+                                    "region_code": "us",        # 区域代码
+                                    "gl": "us",                 # 备用区域代码参数名
+                                    "language": "en",           # 语言
+                                    "hl": "en",                 # 备用语言参数名
+                                    "num_results": 8,           # 结果数量
+                                    "numResults": 8,            # 备用结果数量参数名
+                                    "api_key": self.serper_api_key  # 确保API密钥也被提供
                                 }
-                                
-                                # 某些工具可能使用不同的参数名称
-                                if "serper" in self.search_tool_name.lower():
-                                    # Serper特定格式
-                                    args = {
-                                        "query": query,
-                                        "gl": "us",
-                                        "hl": "en"
-                                    }
                             
                             # 打印参数方便调试
                             with main_container:
