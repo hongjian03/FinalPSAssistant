@@ -514,10 +514,21 @@ def main():
         prompts = load_prompts()
         
         st.subheader("院校信息收集代理 (Agent 1)")
-        
         info_collector_role = st.text_area("角色描述", prompts["ps_info_collector"]["role"], height=150)
         info_collector_task = st.text_area("任务描述", prompts["ps_info_collector"]["task"], height=200)
         info_collector_output = st.text_area("输出格式", prompts["ps_info_collector"]["output"], height=200)
+
+        # 新增Agent 1.1调试区域
+        st.subheader("主网页信息收集代理 (Agent 1.1)")
+        info_collector_main_role = st.text_area("角色描述 (1.1)", prompts.get("ps_info_collector_main", {}).get("role", ""), height=150, key="ps_info_collector_main_role")
+        info_collector_main_task = st.text_area("任务描述 (1.1)", prompts.get("ps_info_collector_main", {}).get("task", ""), height=200, key="ps_info_collector_main_task")
+        info_collector_main_output = st.text_area("输出格式 (1.1)", prompts.get("ps_info_collector_main", {}).get("output", ""), height=200, key="ps_info_collector_main_output")
+
+        # 新增Agent 1.2调试区域
+        st.subheader("深度补全代理 (Agent 1.2)")
+        info_collector_deep_role = st.text_area("角色描述 (1.2)", prompts.get("ps_info_collector_deep", {}).get("role", ""), height=150, key="ps_info_collector_deep_role")
+        info_collector_deep_task = st.text_area("任务描述 (1.2)", prompts.get("ps_info_collector_deep", {}).get("task", ""), height=200, key="ps_info_collector_deep_task")
+        info_collector_deep_output = st.text_area("输出格式 (1.2)", prompts.get("ps_info_collector_deep", {}).get("output", ""), height=200, key="ps_info_collector_deep_output")
         
         st.subheader("支持文件分析代理 (Agent 2.1)")
         
@@ -543,6 +554,17 @@ def main():
             prompts["ps_info_collector"]["role"] = info_collector_role
             prompts["ps_info_collector"]["task"] = info_collector_task
             prompts["ps_info_collector"]["output"] = info_collector_output
+            # 新增保存1.1和1.2
+            if "ps_info_collector_main" not in prompts:
+                prompts["ps_info_collector_main"] = {}
+            if "ps_info_collector_deep" not in prompts:
+                prompts["ps_info_collector_deep"] = {}
+            prompts["ps_info_collector_main"]["role"] = info_collector_main_role
+            prompts["ps_info_collector_main"]["task"] = info_collector_main_task
+            prompts["ps_info_collector_main"]["output"] = info_collector_main_output
+            prompts["ps_info_collector_deep"]["role"] = info_collector_deep_role
+            prompts["ps_info_collector_deep"]["task"] = info_collector_deep_task
+            prompts["ps_info_collector_deep"]["output"] = info_collector_deep_output
             
             prompts["supporting_file_analyzer"]["role"] = supporting_analyzer_role
             prompts["supporting_file_analyzer"]["task"] = supporting_analyzer_task
