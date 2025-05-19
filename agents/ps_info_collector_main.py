@@ -67,7 +67,7 @@ class PSInfoCollectorMain:
             # 选取主网页URL
             main_url = None
             if search_results and "organic" in search_results and search_results["organic"]:
-                for result in search_results.get("organic", []):
+                for result in search_results.get("organic", [])[:2]:  # 只考虑前2个结果
                     link = result.get("link", "").lower()
                     # 优先选择官方网站
                     if university.lower() in link and (".edu" in link or ".ac." in link or "university" in link):
@@ -160,16 +160,18 @@ class PSInfoCollectorMain:
                     sub_query = f"{university} {major} {keywords}"
                     sub_results = await self.serper_client.search_web(sub_query, main_container=search_container)
                     
-                    # 为每个缺失项至少找一个URL
-                    field_urls = []
+                    # 为每个缺失项只找一个最相关的URL
+                    field_url = None
                     if sub_results and "organic" in sub_results:
-                        for res in sub_results.get("organic", [])[:3]:  # 只考虑前3个结果
+                        for res in sub_results.get("organic", [])[:1]:  # 只考虑第一个结果
                             url = res.get("link")
-                            if url and url != main_url and url not in urls_for_deep and url not in field_urls:
-                                field_urls.append(url)
+                            if url and url != main_url and url not in urls_for_deep:
+                                field_url = url
+                                break
                     
                     # 将找到的URL加入总列表
-                    urls_for_deep.extend(field_urls)
+                    if field_url:
+                        urls_for_deep.append(field_url)
                 
                 # 去重并限制URL数量，避免过多抓取
                 urls_for_deep = list(set(urls_for_deep))[:self.max_urls_to_search]  # 最多max_urls_to_search个补充URL
