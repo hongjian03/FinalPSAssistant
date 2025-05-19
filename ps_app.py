@@ -204,6 +204,20 @@ def main():
             major = st.text_input("目标专业", value=st.session_state.major)
             st.session_state.major = major
             
+            # 添加URL限制设置
+            col1, col2 = st.columns(2)
+            with col1:
+                if "max_search_urls" not in st.session_state:
+                    st.session_state.max_search_urls = 5
+                max_search_urls = st.slider("Agent 1.1 最多搜索URL数", min_value=1, max_value=10, value=st.session_state.max_search_urls)
+                st.session_state.max_search_urls = max_search_urls
+            
+            with col2:
+                if "max_process_urls" not in st.session_state:
+                    st.session_state.max_process_urls = 3
+                max_process_urls = st.slider("Agent 1.2 最多处理URL数", min_value=1, max_value=5, value=st.session_state.max_process_urls)
+                st.session_state.max_process_urls = max_process_urls
+            
             # 生成院校信息报告按钮 (只有必填字段已填写时启用)
             generate_enabled = university and major
             
@@ -228,7 +242,10 @@ def main():
                             with progress_container:
                                 agent1_progress.progress(10, "Agent 1.1 (主页面信息收集)：初始化中...")
                             
-                            info_collector_main = PSInfoCollectorMain(model_name=st.session_state.info_collector_model)
+                            info_collector_main = PSInfoCollectorMain(
+                                model_name=st.session_state.info_collector_model,
+                                max_urls_to_search=st.session_state.max_search_urls
+                            )
                             
                             # 创建更新主Agent进度条的回调函数
                             def update_agent1_progress(percent, status):
@@ -254,7 +271,10 @@ def main():
                                 with progress_container:
                                     agent2_progress.progress(10, "Agent 1.2 (补充信息收集)：初始化中...")
                                 
-                                info_collector_deep = PSInfoCollectorDeep(model_name=st.session_state.info_collector_model)
+                                info_collector_deep = PSInfoCollectorDeep(
+                                    model_name=st.session_state.info_collector_model,
+                                    max_urls_to_process=st.session_state.max_process_urls
+                                )
                                 
                                 # 创建更新补全Agent进度条的回调函数
                                 def update_agent2_progress(percent, status):
