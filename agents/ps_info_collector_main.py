@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 import asyncio
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Callable
 import requests
 import json
 import traceback
@@ -21,9 +21,15 @@ class PSInfoCollectorMain:
         # 加载提示词配置
         self.prompts = load_prompts().get("ps_info_collector_main", {})
 
-    async def collect_main_info(self, university: str, major: str, custom_requirements: str = "") -> Dict[str, Any]:
+    async def collect_main_info(self, university: str, major: str, custom_requirements: str = "", progress_callback: Optional[Callable[[int, str], None]] = None) -> Dict[str, Any]:
         """
         搜索课程主网页，生成初步报告，返回：{'report': 报告内容, 'missing_fields': 缺失项, 'urls_for_deep': 需补全的URL列表}
+        
+        Args:
+            university: 目标大学名称
+            major: 目标专业名称
+            custom_requirements: 自定义需求
+            progress_callback: 可选的进度回调函数，用于更新UI进度条
         """
         search_container = st.container()
         with search_container:
@@ -31,6 +37,9 @@ class PSInfoCollectorMain:
             if not hasattr(self.serper_client, 'search_tool_name') or not self.serper_client.search_tool_name:
                 try:
                     st.info("正在初始化Web搜索客户端...")
+                    # 更新进度到20%
+                    if progress_callback:
+                        progress_callback(20, "Agent 1.1：初始化Web搜索客户端...")
                     await self.serper_client.initialize(search_container)
                 except Exception as e:
                     st.error(f"初始化搜索客户端时出错: {str(e)}")
@@ -40,6 +49,9 @@ class PSInfoCollectorMain:
             # 搜索主网页
             with search_container:
                 st.info(f"正在搜索 {university} {major} 主网页...")
+            # 更新进度到40%
+            if progress_callback:
+                progress_callback(40, "Agent 1.1：搜索主网页中...")
             search_query = f"{university} {major} program official site"
             search_results = await self.serper_client.search_web(search_query, main_container=search_container)
             
@@ -68,6 +80,9 @@ class PSInfoCollectorMain:
             # 用Jina抓主网页内容
             with search_container:
                 st.info(f"正在抓取网页内容: {main_url}")
+            # 更新进度到60%
+            if progress_callback:
+                progress_callback(60, "Agent 1.1：抓取网页内容中...")
             
             main_content = ""
             if main_url:
@@ -89,6 +104,9 @@ class PSInfoCollectorMain:
             # 生成初步报告，分析缺失项
             with search_container:
                 st.info("正在分析网页内容，生成初步报告...")
+            # 更新进度到75%
+            if progress_callback:
+                progress_callback(75, "Agent 1.1：分析网页内容，生成初步报告...")
             
             report, missing_fields = await self._analyze_main_content(university, major, main_content, main_url, custom_requirements, search_container)
             
@@ -97,6 +115,9 @@ class PSInfoCollectorMain:
                 with search_container:
                     st.warning(f"信息不完整，缺失项: {', '.join(missing_fields)}")
                     st.info("正在搜索补充信息页面...")
+                # 更新进度到85%
+                if progress_callback:
+                    progress_callback(85, "Agent 1.1：搜索补充信息页面...")
                 
                 # 为每个缺失项找一个最佳URL
                 for field in missing_fields:
@@ -148,6 +169,10 @@ class PSInfoCollectorMain:
             else:
                 with search_container:
                     st.success("主网页信息完整，无需补充")
+            
+            # 更新进度到100%
+            if progress_callback:
+                progress_callback(95, "Agent 1.1：准备完成...")
             
             return {
                 "report": report,
