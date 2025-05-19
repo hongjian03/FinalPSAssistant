@@ -559,17 +559,18 @@ class SerperClient:
             Dictionary containing search results
         """
         # 检查缓存
-        if self.cache_enabled and query in self.search_cache:
+        cache_key = query.lower().strip()  # 标准化缓存键
+        if self.cache_enabled and cache_key in self.search_cache:
             # 如果提供了容器，显示缓存命中信息
             if main_container:
                 with main_container:
                     st.success(f"使用缓存结果: {query}")
-            return self.search_cache[query]
+            return self.search_cache[cache_key]
             
         # 如果没有提供容器，创建一个新的
         if main_container is None:
             main_container = st.container()
-    
+        
         # 所有UI元素都在这个容器内
         with main_container:
             # 显示搜索标题
@@ -587,25 +588,36 @@ class SerperClient:
                 search_status.warning("未找到MCP搜索工具，将使用备用搜索方法")
             return await self._fallback_search(query, search_progress, search_status)
         
+        # 优化参数以减少错误
+        optimized_args = {
+            "query": query,
+            "q": query,          
+            "gl": "us",                 
+            "hl": "en",
+            "region_code": "us",
+            "language": "en",
+            "num_results": 5,    # 减少结果数量       
+            "numResults": 5
+        }
+        
         # 尝试次数和当前尝试
-        max_retries = 2  # 减少重试次数，原为4次
+        max_retries = 2 
         current_retry = 0
         last_error = None
         
-        # 尝试多次搜索以减少TaskGroup错误的影响
+        # 尝试使用MCP进行搜索
         while current_retry < max_retries:
-            # 尝试使用MCP进行搜索
             with main_container:
-                search_progress.progress(20 + current_retry * 5)
+                search_progress.progress(20 + current_retry * 15)
                 search_status.info(f"初始化搜索工具... (尝试 {current_retry+1}/{max_retries})")
             
             try:
-                # 设置较长的超时时间
-                async with asyncio.timeout(20):  # 减少超时时间，原为40秒
+                # 设置较短的超时时间
+                async with asyncio.timeout(15):  # 减少超时时间
                     # 使用streamable_http_client连接到服务器
                     async with streamablehttp_client(self.url) as (read_stream, write_stream, _):
                         with main_container:
-                            search_progress.progress(40 + current_retry * 5)
+                            search_progress.progress(40 + current_retry * 10)
                             search_status.info("创建MCP会话...")
                         
                         # 创建MCP会话
@@ -615,290 +627,78 @@ class SerperClient:
                             
                             with main_container:
                                 search_progress.progress(60 + current_retry * 5)
-                                search_status.info(f"使用 {self.search_tool_name} 执行搜索: {query}")
+                                search_status.info(f"执行搜索: {query}")
                             
-                            # 准备搜索参数 - 确保包含所有必需参数
-                            # 不同的工具可能有不同的参数格式，这里针对常见的情况做处理
-                            if "google" in self.search_tool_name.lower():
-                                # Google搜索工具格式
-                                args = {
-                                    "query": query,
-                                    "gl": "us",    # 地区代码
-                                    "hl": "en",    # 语言
-                                    "numResults": 8 # 结果数量
-                                }
-                            else:
-                                # 通用搜索工具格式 - 确保同时包含所有可能的参数命名方式
-                                args = {
-                                    "query": query,
-                                    "q": query,                 # 备用查询参数名
-                                    "region_code": "us",        # 区域代码
-                                    "gl": "us",                 # 备用区域代码参数名
-                                    "language": "en",           # 语言
-                                    "hl": "en",                 # 备用语言参数名
-                                    "num_results": 8,           # 结果数量
-                                    "numResults": 8,            # 备用结果数量参数名
-                                    "api_key": self.serper_api_key  # 确保API密钥也被提供
-                                }
-                            
-                            # 打印参数方便调试
-                            with main_container:
-                                with st.expander("搜索参数", expanded=False):
-                                    st.code(json.dumps(args, indent=2))
-                            
-                            # 调用MCP工具进行搜索
-                            try:
-                                # 使用一个额外的超时来避免工具调用卡住
-                                async with asyncio.timeout(35):  # 增加超时时间
-                                    result = await session.call_tool(self.search_tool_name, arguments=args)
-                                    
-                                    with main_container:
-                                        search_progress.progress(80)
-                                        search_status.info("处理搜索结果...")
-                                    
-                                    # 处理搜索结果
-                                    if hasattr(result, 'result'):
-                                        if isinstance(result.result, dict):
-                                            # 标准化结果格式
-                                            formatted_results = self._standardize_mcp_results(result.result, query)
-                                            
-                                            # 禁用额外处理以提高速度
-                                            # formatted_results = await self._enrich_university_results(formatted_results, search_progress, search_status, main_container)
-                                            
-                                            with main_container:
-                                                search_progress.progress(100)
-                                                result_count = len(formatted_results.get('organic', []))
-                                                search_status.success(f"搜索成功，找到 {result_count} 条结果")
-                                            
-                                            # 如果搜索成功，将结果存入缓存
-                                            if self.cache_enabled:
-                                                self.search_cache[query] = formatted_results
-                                            
-                                            return formatted_results
-                                        else:
-                                            # 处理非字典结果
-                                            with main_container:
-                                                search_progress.progress(100)
-                                                search_status.warning("非标准搜索结果格式，需要转换")
-                                            
-                                            # 尝试将结果转换为标准格式
-                                            results = self._convert_to_standard_format(result.result, query)
-                                            
-                                            # 禁用额外处理以提高速度
-                                            # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
-                                            
-                                            return results
-                                    else:
-                                        # 结果没有预期的属性
-                                        error_msg = "MCP返回了无效的结果格式"
-                                        
-                                        # 检查结果对象上的错误信息
-                                        if hasattr(result, 'error') and result.error:
-                                            error_msg = f"MCP返回错误: {result.error}"
-                                            
-                                            # 检查是否是特定错误类型
-                                            if "Search query and region code and language are required" in str(result.error):
-                                                # 尝试修改参数并重试
-                                                with main_container:
-                                                    search_status.warning("需要完整的搜索参数，尝试修正参数格式...")
-                                                
-                                                # 调整参数格式
-                                                if current_retry < max_retries - 1:
-                                                    # 尝试更多不同的参数格式
-                                                    if current_retry == 0:
-                                                        args = {
-                                                            "query": query,
-                                                            "gl": "us",
-                                                            "hl": "en"
-                                                        }
-                                                    elif current_retry == 1:
-                                                        args = {
-                                                            "query": query,
-                                                            "region_code": "us",
-                                                            "language": "en"
-                                                        }
-                                                    else:
-                                                        # 最后尝试更简单的格式
-                                                        args = {
-                                                            "q": query,
-                                                            "gl": "us",
-                                                            "hl": "en"
-                                                        }
-                                                    
-                                                    with main_container:
-                                                        with st.expander("修正的搜索参数", expanded=False):
-                                                            st.code(json.dumps(args, indent=2))
-                                                        search_status.info(f"使用新参数重试...")
-                                                    
-                                                    current_retry += 1
-                                                    await asyncio.sleep(1)
-                                                    continue
-                                        
-                                        raise Exception(error_msg)
-                            except asyncio.TimeoutError:
-                                # 工具调用超时，记录错误并尝试重试
-                                last_error = "Tool call timeout"
+                            # 直接使用优化的参数调用工具
+                            # 使用较短的超时
+                            async with asyncio.timeout(12):
+                                result = await session.call_tool(self.search_tool_name, arguments=optimized_args)
+                                
                                 with main_container:
-                                    search_status.warning(f"工具调用超时 (尝试 {current_retry+1}/{max_retries})")
+                                    search_progress.progress(80)
+                                    search_status.info("处理搜索结果...")
                                 
-                                if current_retry < max_retries - 1:
-                                    current_retry += 1
-                                    await asyncio.sleep(1 + current_retry * 0.5)  # 增加等待时间
-                                    continue
-                                else:
-                                    # 最后一次尝试也失败，切换到备用方法
+                                # 处理搜索结果
+                                if hasattr(result, 'result'):
+                                    # 返回前将结果存入缓存
+                                    formatted_results = self._standardize_mcp_results(result.result, query)
+                                    
                                     with main_container:
-                                        search_status.warning("多次尝试工具调用均超时，切换到备用方法")
-                                    results = await self._fallback_search(query, search_progress, search_status)
+                                        search_progress.progress(100)
+                                        result_count = len(formatted_results.get('organic', []))
+                                        search_status.success(f"搜索成功，找到 {result_count} 条结果")
                                     
-                                    # 禁用额外处理以提高速度
-                                    # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
-                                    
-                                    # 如果搜索成功，将结果存入缓存
+                                    # 存入缓存并返回
                                     if self.cache_enabled:
-                                        self.search_cache[query] = results
+                                        self.search_cache[cache_key] = formatted_results
                                     
-                                    return results
-                            except Exception as tool_error:
-                                # 记录错误
-                                last_error = tool_error
-                                error_msg = str(tool_error)
-                                
-                                # 特殊处理TaskGroup错误
-                                if "TaskGroup" in error_msg or "asyncio" in error_msg:
-                                    with main_container:
-                                        search_status.warning(f"工具调用出现TaskGroup错误 (尝试 {current_retry+1}/{max_retries})")
-                                    
-                                    # 等待更长时间，处理TaskGroup错误
-                                    if current_retry < max_retries - 1:
-                                        current_retry += 1
-                                        wait_time = 1 + current_retry * 1.0  # 更长的等待时间
-                                        with main_container:
-                                            search_status.info(f"等待 {wait_time:.1f} 秒后重试...")
-                                        await asyncio.sleep(wait_time)
-                                        continue
-                                    else:
-                                        # 最后一次尝试也失败，切换到备用方法
-                                        with main_container:
-                                            search_status.warning("多次尝试均出现TaskGroup错误，切换到备用方法")
-                                        results = await self._fallback_search(query, search_progress, search_status)
-                                        
-                                        # 禁用额外处理以提高速度
-                                        # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
-                                        
-                                        # 如果搜索成功，将结果存入缓存
-                                        if self.cache_enabled:
-                                            self.search_cache[query] = results
-                                        
-                                        return results
-                                # 检查是否是搜索参数错误
-                                elif "query" in error_msg.lower() and "required" in error_msg.lower():
-                                    with main_container:
-                                        search_status.info(f"搜索参数调整中: {error_msg[:100]} (这是正常流程，请稍候...)")
-                                    
-                                    # 尝试使用更简单的参数重试
-                                    if current_retry < max_retries - 1:
-                                        current_retry += 1
-                                        # 尝试不同的参数格式
-                                        if "region" in error_msg.lower() or "language" in error_msg.lower():
-                                            args = {
-                                                "query": query,
-                                                "gl": "us",
-                                                "hl": "en"
-                                            }
-                                        else:
-                                            # 最简单的参数
-                                            args = {"query": query}
-                                        
-                                        with main_container:
-                                            with st.expander("修正的搜索参数", expanded=False):
-                                                st.code(json.dumps(args, indent=2))
-                                        
-                                        await asyncio.sleep(1)
-                                        continue
+                                    return formatted_results
                                 else:
-                                    # 其他错误，记录详情并重试
-                                    with main_container:
-                                        search_status.error(f"工具调用错误: {type(tool_error).__name__}")
-                                        with st.expander("错误详情", expanded=False):
-                                            st.code(error_msg)
+                                    raise Exception("无效的搜索结果格式")
                                     
-                                    if current_retry < max_retries - 1:
-                                        current_retry += 1
-                                        await asyncio.sleep(1)
-                                        continue
-                                    else:
-                                        # 最后一次尝试也失败，切换到备用方法
-                                        results = await self._fallback_search(query, search_progress, search_status)
-                                        
-                                        # 禁用额外处理以提高速度
-                                        # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
-                                        
-                                        # 如果搜索成功，将结果存入缓存
-                                        if self.cache_enabled:
-                                            self.search_cache[query] = results
-                                        
-                                        return results
-            
-            except asyncio.TimeoutError:
-                # MCP连接超时，记录错误并尝试重试
-                last_error = "MCP connection timeout"
-                with main_container:
-                    search_status.warning(f"MCP连接超时 (尝试 {current_retry+1}/{max_retries})")
-                
-                if current_retry < max_retries - 1:
-                    current_retry += 1
-                    wait_time = 1 + current_retry * 0.5  # 逐渐增加等待时间
-                    with main_container:
-                        search_status.info(f"等待 {wait_time:.1f} 秒后重试...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                else:
-                    # 最后一次尝试也失败，切换到备用方法
-                    with main_container:
-                        search_status.warning("多次连接均超时，使用备用搜索")
-                    results = await self._fallback_search(query, search_progress, search_status)
-                    
-                    # 禁用额外处理以提高速度
-                    # results = await self._enrich_university_results(results, search_progress, search_status, main_container)
-                    
-                    # 如果搜索成功，将结果存入缓存
-                    if self.cache_enabled:
-                        self.search_cache[query] = results
-                    
-                    return results
             except Exception as e:
                 # 记录错误
                 last_error = e
                 error_msg = str(e)
                 
-                with main_container:
-                    search_status.error(f"连接错误: {type(e).__name__}")
-                    with st.expander("错误详情", expanded=False):
-                        st.code(error_msg)
-                
-                # 检查是否是TaskGroup相关错误
-                if "TaskGroup" in error_msg:
+                # 对于搜索参数错误，使用备用格式
+                if "query" in error_msg.lower() and "required" in error_msg.lower():
+                    with main_container:
+                        search_status.info(f"搜索参数调整中 (这是正常流程，请稍候...)")
+                    
+                    if current_retry < max_retries - 1:
+                        # 使用极简参数
+                        optimized_args = {
+                            "q": query,
+                            "gl": "us",
+                            "hl": "en"
+                        }
+                        current_retry += 1
+                        await asyncio.sleep(0.5)
+                        continue
+                else:
+                    with main_container:
+                        search_status.warning(f"搜索出错: {error_msg[:100]}")
+                    
                     if current_retry < max_retries - 1:
                         current_retry += 1
-                        wait_time = 1 + current_retry * 1.0  # 专门针对TaskGroup错误增加等待时间
-                        with main_container:
-                            search_status.info(f"TaskGroup错误，等待 {wait_time:.1f} 秒后重试...")
-                        await asyncio.sleep(wait_time)
+                        await asyncio.sleep(0.5)
                         continue
-                elif current_retry < max_retries - 1:
-                    current_retry += 1
-                    with main_container:
-                        search_status.info(f"重试中... ({current_retry}/{max_retries})")
-                    await asyncio.sleep(1)
-                    continue
-                
-                # 所有重试失败，使用备用搜索
-                with main_container:
-                    search_status.warning("所有连接尝试均失败，使用备用搜索")
-                results = await self._fallback_search(query, search_progress, search_status)
-                results = await self._enrich_university_results(results, search_progress, search_status, main_container)
-                return results
+            
+            # 如果所有尝试都失败，使用备用方法
+            break
+        
+        # 使用备用搜索方法
+        with main_container:
+            search_status.warning("MCP搜索失败，使用备用方法")
+        
+        results = await self._fallback_search(query, search_progress, search_status)
+        
+        # 存入缓存并返回
+        if self.cache_enabled:
+            self.search_cache[cache_key] = results
+        
+        return results
     
     async def _enrich_university_results(self, search_results: Dict[str, Any], progress_bar=None, status_text=None, main_container=None) -> Dict[str, Any]:
         """
@@ -1999,13 +1799,15 @@ class SerperClient:
         Returns:
             抓取的内容
         """
+        # 标准化URL作为缓存键
+        cache_key = url.lower().strip()
         # 检查缓存
-        if self.cache_enabled and url in self.scrape_cache:
+        if self.cache_enabled and cache_key in self.scrape_cache:
             # 如果提供了容器，显示缓存命中信息
             if main_container:
                 with main_container:
                     st.success(f"使用缓存内容: {url}")
-            return self.scrape_cache[url]
+            return self.scrape_cache[cache_key]
             
         if main_container is None:
             main_container = st.container()
@@ -2054,7 +1856,7 @@ class SerperClient:
                                     if content:
                                         # 保存到缓存
                                         if self.cache_enabled:
-                                            self.scrape_cache[url] = content
+                                            self.scrape_cache[cache_key] = content
                                         return content
                                     else:
                                         raise Exception("抓取结果为空")
