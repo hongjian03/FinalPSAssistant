@@ -217,29 +217,67 @@ def main():
                         collection_container = st.container()
                         with collection_container:
                             st.subheader(f"{university} {major} 专业信息收集中...")
+                            # 创建进度条区域
+                            progress_container = st.container()
+                            with progress_container:
+                                st.write("### 信息收集进度")
+                                agent1_progress = st.progress(0, "Agent 1.1 (主页面信息收集)：准备中...")
+                                agent2_progress = st.progress(0, "Agent 1.2 (补充信息收集)：等待中...")
+                            
                             # 1.1主Agent
+                            with progress_container:
+                                agent1_progress.progress(10, "Agent 1.1 (主页面信息收集)：初始化中...")
+                            
                             info_collector_main = PSInfoCollectorMain(model_name=st.session_state.info_collector_model)
+                            
+                            # 创建更新主Agent进度条的回调函数
+                            def update_agent1_progress(percent, status):
+                                with progress_container:
+                                    agent1_progress.progress(percent, f"Agent 1.1 (主页面信息收集)：{status}")
+                            
                             main_result = asyncio.run(info_collector_main.collect_main_info(
                                 university=university,
                                 major=major,
-                                custom_requirements=""
+                                custom_requirements="",
+                                progress_callback=update_agent1_progress
                             ))
+                            
+                            with progress_container:
+                                agent1_progress.progress(100, "Agent 1.1 (主页面信息收集)：已完成")
+                            
                             report = main_result["report"]
                             missing_fields = main_result["missing_fields"]
                             urls_for_deep = main_result["urls_for_deep"]
+                            
                             # 1.2补全Agent
                             if missing_fields and urls_for_deep:
+                                with progress_container:
+                                    agent2_progress.progress(10, "Agent 1.2 (补充信息收集)：初始化中...")
+                                
                                 info_collector_deep = PSInfoCollectorDeep(model_name=st.session_state.info_collector_model)
+                                
+                                # 创建更新补全Agent进度条的回调函数
+                                def update_agent2_progress(percent, status):
+                                    with progress_container:
+                                        agent2_progress.progress(percent, f"Agent 1.2 (补充信息收集)：{status}")
+                                
                                 final_report = asyncio.run(info_collector_deep.complete_missing_info(
                                     main_report=report,
                                     missing_fields=missing_fields,
                                     urls_for_deep=urls_for_deep,
                                     university=university,
                                     major=major,
-                                    custom_requirements=""
+                                    custom_requirements="",
+                                    progress_callback=update_agent2_progress
                                 ))
+                                
+                                with progress_container:
+                                    agent2_progress.progress(100, "Agent 1.2 (补充信息收集)：已完成")
                             else:
+                                with progress_container:
+                                    agent2_progress.progress(100, "Agent 1.2 (补充信息收集)：无需执行")
                                 final_report = report
+                            
                             st.session_state.university_info_report = final_report
                             st.session_state.current_step = 2
                             st.rerun()
