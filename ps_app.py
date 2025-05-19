@@ -11,7 +11,6 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import asyncio
 
 # Import custom modules
-from agents.ps_info_collector import PSInfoCollector
 from agents.supporting_file_analyzer import SupportingFileAnalyzer
 from agents.ps_analyzer import PSAnalyzer
 from agents.ps_rewriter import PSRewriter
@@ -230,7 +229,7 @@ def main():
                             urls_for_deep = main_result["urls_for_deep"]
                             # 1.2补全Agent
                             if missing_fields and urls_for_deep:
-                                info_collector_deep = PSInfoCollectorDeep()
+                                info_collector_deep = PSInfoCollectorDeep(model_name=st.session_state.info_collector_model)
                                 final_report = asyncio.run(info_collector_deep.complete_missing_info(
                                     main_report=report,
                                     missing_fields=missing_fields,
@@ -513,11 +512,6 @@ def main():
         # 加载当前提示词
         prompts = load_prompts()
         
-        st.subheader("院校信息收集代理 (Agent 1)")
-        info_collector_role = st.text_area("角色描述", prompts["ps_info_collector"]["role"], height=150)
-        info_collector_task = st.text_area("任务描述", prompts["ps_info_collector"]["task"], height=200)
-        info_collector_output = st.text_area("输出格式", prompts["ps_info_collector"]["output"], height=200)
-
         # 新增Agent 1.1调试区域
         st.subheader("主网页信息收集代理 (Agent 1.1)")
         info_collector_main_role = st.text_area("角色描述 (1.1)", prompts.get("ps_info_collector_main", {}).get("role", ""), height=150, key="ps_info_collector_main_role")
@@ -551,10 +545,7 @@ def main():
         # 保存按钮
         if st.button("保存提示词"):
             # 更新提示词字典
-            prompts["ps_info_collector"]["role"] = info_collector_role
-            prompts["ps_info_collector"]["task"] = info_collector_task
-            prompts["ps_info_collector"]["output"] = info_collector_output
-            # 新增保存1.1和1.2
+            # 新增/保存1.1和1.2
             if "ps_info_collector_main" not in prompts:
                 prompts["ps_info_collector_main"] = {}
             if "ps_info_collector_deep" not in prompts:
