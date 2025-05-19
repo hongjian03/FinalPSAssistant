@@ -71,7 +71,14 @@ class PSInfoCollectorMain:
             
             main_content = ""
             if main_url:
-                main_content = await self.serper_client.scrape_url(main_url, main_container=search_container)
+                try:
+                    # 调用有main_container参数的那个scrape_url方法
+                    main_content = await self.serper_client.scrape_url(main_url, main_container=search_container)
+                except TypeError as e:
+                    # 如果遇到参数错误，尝试不带参数调用
+                    with search_container:
+                        st.warning(f"抓取方法参数错误: {str(e)}，尝试不带main_container参数调用")
+                    main_content = await self.serper_client.scrape_url(main_url)
                 if not main_content:
                     with search_container:
                         st.warning("主网页内容为空，将使用搜索结果摘要")
