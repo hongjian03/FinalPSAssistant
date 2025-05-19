@@ -12,6 +12,29 @@ import requests
 import time
 import aiohttp
 
+# 导入Jina Reader配置
+try:
+    from config.jina_config import get_jina_config
+    JINA_CONFIG = get_jina_config()
+except ImportError:
+    # 默认配置
+    JINA_CONFIG = {
+        "base_url": "https://r.jina.ai/",
+        "request": {
+            "timeout": 25,
+            "max_retries": 2,
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "Accept": "text/markdown,text/plain,*/*;q=0.9",
+                "Cache-Control": "no-cache"
+            }
+        },
+        "features": {
+            "use_as_primary": True,
+            "fallback_to_direct": True
+        }
+    }
+
 class SerperClient:
     """
     A client for interacting with the Serper API.
@@ -323,12 +346,12 @@ class SerperClient:
             scrape_progress = st.progress(0)
             scrape_status.info(f"正在抓取网页内容: {url}")
             
-            # 直接使用Jina Reader进行抓取
-            if self.use_jina_as_primary:
-                scrape_status.info("使用Jina Reader进行内容抓取...")
+            # 使用配置中的设置决定使用哪种抓取方法
+            if JINA_CONFIG["features"]["use_as_primary"]:
+                scrape_status.info("直接使用Jina Reader抓取内容...")
                 return await self.jina_reader_scrape(url, main_container)
             
-            # 下面的代码将不会执行，但保留作为备选
+            # 如果配置为不使用Jina作为主要方法，则按老逻辑执行（下面的代码基本不会执行）
             # 检查是否有抓取工具可用
             if not hasattr(self, 'scrape_tool_name') or not self.scrape_tool_name:
                 scrape_status.warning("未找到有效的抓取工具，将使用直接抓取方法")
@@ -1877,19 +1900,17 @@ class SerperClient:
                 # 更新进度
                 scrape_progress.progress(30)
                 
-                # 构建Jina Reader URL
-                jina_url = f"{self.jina_reader_url}{url}"
-                scrape_status.info(f"正在通过Jina Reader API抓取: {jina_url}")
+                # 从配置中获取Jina Reader设置
+                jina_base_url = JINA_CONFIG["base_url"]
+                request_timeout = JINA_CONFIG["request"]["timeout"]
+                max_retries = JINA_CONFIG["request"]["max_retries"]
+                headers = JINA_CONFIG["request"]["headers"]
                 
-                # 设置请求头
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                    "Accept": "text/markdown,text/plain,*/*;q=0.9",
-                    "Cache-Control": "no-cache"
-                }
+                # 构建Jina Reader URL
+                jina_url = f"{jina_base_url}{url}"
+                scrape_status.info(f"通过Jina Reader API抓取: {jina_url}")
                 
                 # 使用较短的超时发送请求
-                max_retries = 2
                 current_retry = 0
                 last_error = None
                 
@@ -1900,7 +1921,7 @@ class SerperClient:
                         
                         # 使用aiohttp进行异步请求
                         async with aiohttp.ClientSession() as session:
-                            async with session.get(jina_url, headers=headers, timeout=25) as response:
+                            async with session.get(jina_url, headers=headers, timeout=request_timeout) as response:
                                 if response.status == 200:
                                     content = await response.text()
                                     scrape_status.success("成功通过Jina Reader抓取内容")
@@ -1927,12 +1948,24 @@ class SerperClient:
                             scrape_status.error(f"Jina Reader抓取失败: {str(e)}")
                             break
                 
-                # 如果所有Jina尝试都失败，回退到直接抓取
-                scrape_status.warning("无法使用Jina Reader抓取，切换到直接抓取")
-                return await self.direct_scrape(url, main_container)
+                # 如果所有Jina尝试都失败且配置允许回退，则使用直接抓取
+                if JINA_CONFIG["features"]["fallback_to_direct"]:
+                    scrape_status.warning("无法使用Jina Reader抓取，切换到直接抓取")
+                    return await self.direct_scrape(url, main_container)
+                else:
+                    # 配置不允许回退，返回错误信息
+                    scrape_progress.progress(100)
+                    scrape_status.error("Jina Reader抓取失败，未启用回退")
+                    return f"# 抓取失败\n\n无法使用Jina Reader抓取 {url} 的内容，且未启用回退到直接抓取。错误: {str(last_error)}"
                 
             except Exception as e:
                 # 处理所有其他异常
                 scrape_status.error(f"Jina Reader处理错误: {str(e)}")
                 scrape_progress.progress(100)
-                return await self.direct_scrape(url, main_container)
+                
+                # 如果配置允许回退，使用直接抓取
+                if JINA_CONFIG["features"]["fallback_to_direct"]:
+                    return await self.direct_scrape(url, main_container)
+                else:
+                    # 配置不允许回退，返回错误信息
+                    return f"# 抓取错误\n\n处理 {url} 时发生异常: {str(e)}\n\n未启用回退到直接抓取。"
