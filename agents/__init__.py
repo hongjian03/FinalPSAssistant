@@ -11,4 +11,6 @@ from .serper_client import SerperClient
 from .ps_info_collector import PSInfoCollector
 from .supporting_file_analyzer import SupportingFileAnalyzer
 from .ps_analyzer import PSAnalyzer
-from .ps_rewriter import PSRewriter 
+from .ps_rewriter import PSRewriter
+from .ps_info_collector_main import PSInfoCollectorMain
+from .ps_info_collector_deep import PSInfoCollectorDeep 
