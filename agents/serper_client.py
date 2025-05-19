@@ -10,16 +10,41 @@ import mcp
 from mcp.client.streamable_http import streamablehttp_client
 import requests
 import time
+import aiohttp
 
 class SerperClient:
     """
-    Client for interacting with the Serper MCP server for web search capabilities.
-    This allows agents to search for up-to-date information from the web.
-    Using the Smithery-provided HTTP streaming implementation for MCP.
+    A client for interacting with the Serper API.
+    
+    This client connects to an MCP server to use Serper's tools for web search and content extraction.
     """
     
     def __init__(self):
-        """Initialize the Serper MCP client with configuration from Streamlit secrets."""
+        """
+        Initialize the SerperClient.
+        """
+        # Serper MCP server URL
+        self.url = "wss://mcp.serper.dev"
+        
+        # Alternatively, can use the Deepinfra MCP server
+        # self.url = "wss://mcp.deepinfra.com"
+        
+        # Available tools on the server
+        self.available_tools = []
+        
+        # Search and scrape tools to be selected
+        self.search_tool_name = None
+        self.scrape_tool_name = None
+        
+        # Jina Reader API URL for web scraping
+        self.jina_reader_url = "https://r.jina.ai/"
+        
+        # Track MCP connection failures for fallback strategies
+        self.mcp_scraping_failures = 0
+        
+        # 一律使用Jina Reader作为抓取方法
+        self.use_jina_as_primary = True
+        
         # Get API keys from Streamlit secrets
         self.serper_api_key = st.secrets.get("SERPER_API_KEY", "").strip()
         self.smithery_api_key = st.secrets.get("SMITHERY_API_KEY", "").strip()
@@ -280,7 +305,7 @@ class SerperClient:
     
     async def scrape_url(self, url: str, main_container=None) -> str:
         """
-        抓取指定URL的内容
+        抓取指定URL的内容，直接使用Jina Reader API
         
         Args:
             url: 要抓取的URL
@@ -298,6 +323,12 @@ class SerperClient:
             scrape_progress = st.progress(0)
             scrape_status.info(f"正在抓取网页内容: {url}")
             
+            # 直接使用Jina Reader进行抓取
+            if self.use_jina_as_primary:
+                scrape_status.info("使用Jina Reader进行内容抓取...")
+                return await self.jina_reader_scrape(url, main_container)
+            
+            # 下面的代码将不会执行，但保留作为备选
             # 检查是否有抓取工具可用
             if not hasattr(self, 'scrape_tool_name') or not self.scrape_tool_name:
                 scrape_status.warning("未找到有效的抓取工具，将使用直接抓取方法")
@@ -387,25 +418,40 @@ class SerperClient:
                                             
                                             # 增加重试计数
                                             current_retry += 1
+                                            # 增加MCP失败计数
+                                            self.mcp_scraping_failures += 1
+                                            
                                             if current_retry < max_retries:
                                                 await asyncio.sleep(1)
                                                 continue
                                             else:
-                                                # 所有重试都失败，切换到直接抓取
-                                                scrape_status.warning("MCP抓取多次失败，切换到直接抓取")
-                                                return await self.direct_scrape(url, main_container)
+                                                # 所有重试都失败，检查是否可以使用Jina Reader
+                                                if self.use_jina_as_primary and self.mcp_scraping_failures >= 2:
+                                                    scrape_status.warning("MCP抓取多次失败，尝试使用Jina Reader抓取")
+                                                    return await self.jina_reader_scrape(url, main_container)
+                                                else:
+                                                    # 否则回退到直接抓取
+                                                    scrape_status.warning("MCP抓取多次失败，切换到直接抓取")
+                                                    return await self.direct_scrape(url, main_container)
                                 except asyncio.TimeoutError:
                                     # 工具调用超时
                                     last_error = "工具调用超时"
                                     scrape_status.warning(f"抓取工具调用超时 (尝试 {current_retry+1}/{max_retries})")
                                     current_retry += 1
+                                    self.mcp_scraping_failures += 1
+                                    
                                     if current_retry < max_retries:
                                         await asyncio.sleep(1)
                                         continue
                                     else:
-                                        # 所有重试都失败，切换到直接抓取
-                                        scrape_status.warning("MCP抓取多次超时，切换到直接抓取")
-                                        return await self.direct_scrape(url, main_container)
+                                        # 所有重试都失败，检查是否可以使用Jina Reader
+                                        if self.use_jina_as_primary and self.mcp_scraping_failures >= 2:
+                                            scrape_status.warning("MCP抓取多次超时，尝试使用Jina Reader抓取")
+                                            return await self.jina_reader_scrape(url, main_container)
+                                        else:
+                                            # 否则回退到直接抓取
+                                            scrape_status.warning("MCP抓取多次超时，切换到直接抓取")
+                                            return await self.direct_scrape(url, main_container)
                                 except Exception as tool_error:
                                     # 工具调用异常
                                     error_msg = str(tool_error)
@@ -419,13 +465,20 @@ class SerperClient:
                                     
                                     # 增加重试计数
                                     current_retry += 1
+                                    self.mcp_scraping_failures += 1
+                                    
                                     if current_retry < max_retries:
                                         await asyncio.sleep(1)
                                         continue
                                     else:
-                                        # 所有重试都失败，切换到直接抓取
-                                        scrape_status.warning("MCP抓取多次出错，切换到直接抓取")
-                                        return await self.direct_scrape(url, main_container)
+                                        # 所有重试都失败，检查是否可以使用Jina Reader
+                                        if self.use_jina_as_primary and self.mcp_scraping_failures >= 2:
+                                            scrape_status.warning("MCP抓取多次出错，尝试使用Jina Reader抓取")
+                                            return await self.jina_reader_scrape(url, main_container)
+                                        else:
+                                            # 否则回退到直接抓取
+                                            scrape_status.warning("MCP抓取多次出错，切换到直接抓取")
+                                            return await self.direct_scrape(url, main_container)
                 except (asyncio.TimeoutError, Exception) as e:
                     # 连接或会话异常
                     error_msg = str(e)
@@ -441,18 +494,30 @@ class SerperClient:
                     
                     # 增加重试计数
                     current_retry += 1
+                    self.mcp_scraping_failures += 1
+                    
                     if current_retry < max_retries:
                         await asyncio.sleep(1)
                         continue
                     else:
-                        # 所有重试都失败，切换到直接抓取
-                        scrape_status.warning("MCP连接多次失败，切换到直接抓取")
-                        return await self.direct_scrape(url, main_container)
+                        # 所有重试都失败，检查是否可以使用Jina Reader
+                        if self.use_jina_as_primary and self.mcp_scraping_failures >= 2:
+                            scrape_status.warning("MCP连接多次失败，尝试使用Jina Reader抓取")
+                            return await self.jina_reader_scrape(url, main_container)
+                        else:
+                            # 否则回退到直接抓取
+                            scrape_status.warning("MCP连接多次失败，切换到直接抓取")
+                            return await self.direct_scrape(url, main_container)
             
             # 如果执行到这里，表示所有重试都已用完但没有返回结果
-            # 使用直接抓取作为最后手段
-            scrape_status.warning("所有MCP抓取尝试均失败，切换到直接抓取")
-            return await self.direct_scrape(url, main_container)
+            # 首先尝试Jina Reader，然后再使用直接抓取作为最后手段
+            if self.use_jina_as_primary and self.mcp_scraping_failures >= 2:
+                scrape_status.warning("所有MCP抓取尝试均失败，尝试使用Jina Reader抓取")
+                return await self.jina_reader_scrape(url, main_container)
+            else:
+                # 使用直接抓取作为最后手段
+                scrape_status.warning("所有MCP抓取尝试均失败，切换到直接抓取")
+                return await self.direct_scrape(url, main_container)
     
     async def search_web(self, query: str, main_container=None) -> Dict[str, Any]:
         """
@@ -898,13 +963,8 @@ class SerperClient:
                 status_text.info(f"抓取大学网站 ({idx+1}/{len(tasks)}): {url}")
             
             try:
-                # 使用抓取工具获取内容
-                if hasattr(self, 'scrape_tool_name') and self.scrape_tool_name:
-                    # 使用专门的抓取方法
-                    page_content = await self.scrape_url(url, main_container)
-                else:
-                    # 使用直接抓取方法
-                    page_content = await self.direct_scrape(url, main_container)
+                # 使用Jina Reader抓取网页内容
+                page_content = await self.jina_reader_scrape(url, main_container)
                 
                 # 检查结果是否有效
                 if page_content and len(page_content) > 200 and not page_content.startswith(("# 无法抓取内容", "# 抓取错误")):
@@ -1793,3 +1853,86 @@ class SerperClient:
         final_text = cleaned_text.replace('(待补充)', '').replace('(待确认)', '')
         
         return final_text.strip()
+
+    async def jina_reader_scrape(self, url: str, main_container=None) -> str:
+        """
+        使用Jina Reader API抓取URL内容
+        
+        Args:
+            url: 要抓取的URL
+            main_container: 用于显示进度的容器
+            
+        Returns:
+            抓取的内容
+        """
+        if main_container is None:
+            main_container = st.container()
+        
+        with main_container:
+            scrape_status = st.empty()
+            scrape_progress = st.progress(0)
+            scrape_status.info(f"使用Jina Reader抓取内容: {url}")
+            
+            try:
+                # 更新进度
+                scrape_progress.progress(30)
+                
+                # 构建Jina Reader URL
+                jina_url = f"{self.jina_reader_url}{url}"
+                scrape_status.info(f"正在通过Jina Reader API抓取: {jina_url}")
+                
+                # 设置请求头
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                    "Accept": "text/markdown,text/plain,*/*;q=0.9",
+                    "Cache-Control": "no-cache"
+                }
+                
+                # 使用较短的超时发送请求
+                max_retries = 2
+                current_retry = 0
+                last_error = None
+                
+                while current_retry <= max_retries:
+                    try:
+                        scrape_status.info(f"发送Jina Reader请求 (尝试 {current_retry+1}/{max_retries+1})...")
+                        scrape_progress.progress(50 + current_retry * 10)
+                        
+                        # 使用aiohttp进行异步请求
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(jina_url, headers=headers, timeout=25) as response:
+                                if response.status == 200:
+                                    content = await response.text()
+                                    scrape_status.success("成功通过Jina Reader抓取内容")
+                                    scrape_progress.progress(100)
+                                    
+                                    # 返回抓取的内容
+                                    if content:
+                                        return content
+                                    else:
+                                        raise Exception("抓取结果为空")
+                                else:
+                                    status_code = response.status
+                                    status_text = response.reason
+                                    raise Exception(f"HTTP错误: {status_code} {status_text}")
+                        
+                    except Exception as e:
+                        last_error = e
+                        current_retry += 1
+                        if current_retry <= max_retries:
+                            scrape_status.warning(f"Jina Reader请求失败，重试中: {str(e)[:100]}...")
+                            await asyncio.sleep(1)
+                        else:
+                            # 所有重试都失败
+                            scrape_status.error(f"Jina Reader抓取失败: {str(e)}")
+                            break
+                
+                # 如果所有Jina尝试都失败，回退到直接抓取
+                scrape_status.warning("无法使用Jina Reader抓取，切换到直接抓取")
+                return await self.direct_scrape(url, main_container)
+                
+            except Exception as e:
+                # 处理所有其他异常
+                scrape_status.error(f"Jina Reader处理错误: {str(e)}")
+                scrape_progress.progress(100)
+                return await self.direct_scrape(url, main_container)
