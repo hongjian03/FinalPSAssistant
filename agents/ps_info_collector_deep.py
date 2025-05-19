@@ -62,7 +62,20 @@ class PSInfoCollectorDeep:
                     progress_percent = 15 + int(((i+1) / len(urls_for_deep)) * 40)
                     progress_callback(progress_percent, f"Agent 1.2：抓取第 {i+1}/{len(urls_for_deep)} 个页面...")
                 
-                content = await self.serper_client.scrape_url(url, main_container=deep_container)
+                try:
+                    # 使用jina_reader_scrape替代scrape_url
+                    content = await self.serper_client.jina_reader_scrape(url, main_container=deep_container)
+                except Exception as e:
+                    # 如果Jina Reader失败，尝试直接抓取
+                    with deep_container:
+                        st.warning(f"Jina Reader抓取失败: {str(e)}，尝试直接抓取")
+                    try:
+                        content = await self.serper_client.direct_scrape(url, main_container=deep_container)
+                    except Exception as direct_error:
+                        with deep_container:
+                            st.error(f"所有抓取方法均失败: {str(direct_error)}")
+                        content = ""
+                
                 if content:
                     scraped_contents[url] = content
                     with deep_container:
