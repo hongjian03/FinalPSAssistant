@@ -898,7 +898,7 @@ class SerperClient:
         with main_container:
             if status_text is None:
                 status_text = st.empty()
-            status_text.info("分析搜索结果，查找大学网站...")
+            status_text.info("分析搜索结果，查找官方大学网站...")
             
             # 创建一个新的进度条来显示增强过程
             enrich_progress = st.progress(0)
@@ -911,10 +911,23 @@ class SerperClient:
             'faculty', 'department', 'course', 'apply', 'application', 'enrollment'
         ]
         
-        # 更多大学域名模式
-        uni_domains = [
-            '.edu', '.ac.uk', '.edu.au', '.edu.cn', '.ac.jp', '.edu.sg', '.edu.hk',
-            'university.', '.uni-', '-uni.', '.college.', '.sch.'
+        # 更多大学域名模式 - 优先考虑官方域名
+        official_uni_domains = [
+            '.edu/', '.ac.uk/', '.edu.au/', '.edu.cn/', '.ac.jp/', '.edu.sg/', '.edu.hk/',
+            'university.edu', '.uni-', '-uni.', '.college.edu', '.sch.'
+        ]
+        
+        # 非官方网站的关键词和域名 - 用于过滤
+        unofficial_keywords = [
+            'review', 'ranking', 'compare', 'forum', 'discussion', 'blog', 'student',
+            'scholarship', 'rankings', 'list', 'top', 'best', 'rating'
+        ]
+        
+        unofficial_domains = [
+            'studyportals', 'timeshighereducation', 'topuniversities', 'mastersportal',
+            'thestudentroom', 'reddit.com', 'quora.com', 'collegeconfidential',
+            'findamasters', 'hotcoursesabroad', 'prospects.ac.uk', 'collegeprowler',
+            'niche.com', 'petersons.com', 'gradschools.com', 'usnews.com'
         ]
         
         # 复制结果列表，避免直接修改原列表导致迭代问题
@@ -925,59 +938,117 @@ class SerperClient:
         processed_urls = set()
         max_to_process = 5  # 限制处理的大学网站数量，避免过多请求
         
-        # 首先找到和处理最可能的大学相关URL
+        # 首先找到和处理最可能的官方大学相关URL
         university_results = []
         
         with main_container:
-            status_text.info("识别大学相关网站...")
+            status_text.info("识别官方大学网站...")
+        
+        # 第一步：先给所有结果评分，排序官方和非官方网站
+        scored_results = []
         
         for i, result in enumerate(results_to_process):
             if "link" in result and result["link"]:
                 url = result["link"]
+                score = 0
+                is_official = False
+                is_unofficial = False
                 
-                # 跳过已处理的URL
-                if url in processed_urls:
-                    continue
-                
-                # 检查是否是大学网站
-                is_uni_site = False
-                
-                # 域名检查
-                for domain in uni_domains:
+                # 检查是否是官方大学网站 - 给高分
+                for domain in official_uni_domains:
                     if domain in url.lower():
-                        is_uni_site = True
+                        score += 100
+                        is_official = True
                         break
                 
-                # 关键词检查
-                if not is_uni_site:
-                    if result.get("title"):
-                        title_text = result["title"].lower()
-                        for keyword in uni_keywords:
-                            if keyword in url.lower() or keyword in title_text:
-                                is_uni_site = True
-                                break
+                # 检查是否是非官方网站 - 扣分
+                for domain in unofficial_domains:
+                    if domain in url.lower():
+                        score -= 50
+                        is_unofficial = True
+                        break
                 
-                # 如果是大学网站，加入优先处理列表
-                if is_uni_site:
+                # 标题和摘要中的关键词检查
+                title_text = result.get("title", "").lower()
+                snippet_text = result.get("snippet", "").lower()
+                
+                # 检查官方关键词
+                for keyword in uni_keywords:
+                    if keyword in url.lower():
+                        score += 10
+                    if keyword in title_text:
+                        score += 5
+                    if keyword in snippet_text:
+                        score += 3
+                
+                # 检查非官方关键词 - 扣分
+                for keyword in unofficial_keywords:
+                    if keyword in url.lower():
+                        score -= 5
+                    if 'ranking' in title_text or 'best' in title_text or 'top' in title_text:
+                        score -= 10
+                
+                # 特殊加分：.edu域名强相关的更可能是官方
+                if '.edu/' in url.lower() and not is_unofficial:
+                    score += 50
+                
+                # 网址越短越可能是官方主页
+                url_parts = url.split('/')
+                if len(url_parts) <= 4: # 如 https://www.stanford.edu/
+                    score += 20
+                
+                # 添加到评分列表
+                scored_results.append((i, result, url, score, is_official, is_unofficial))
+        
+        # 按分数排序，高分在前
+        scored_results.sort(key=lambda x: x[3], reverse=True)
+        
+        # 优先处理官方网站，然后是高分非官方网站
+        official_count = 0
+        
+        with main_container:
+            # 显示排序结果和诊断信息
+            with st.expander("搜索结果评分", expanded=False):
+                for i, result, url, score, is_official, is_unofficial in scored_results[:8]:
+                    if is_official:
+                        st.write(f"✓ 官方站点 ({score}分): {url}")
+                    elif is_unofficial:
+                        st.write(f"✗ 非官方站点 ({score}分): {url}")
+                    else:
+                        st.write(f"? 未确定 ({score}分): {url}")
+        
+        # 提取要处理的大学网站 - 优先官方，有限数量
+        university_results = []
+        
+        # 先添加官方网站
+        for i, result, url, score, is_official, is_unofficial in scored_results:
+            if is_official and official_count < 3:  # 最多处理3个官方网站
+                university_results.append((i, result, url))
+                official_count += 1
+        
+        # 然后添加未确认但高分的站点，直到达到最大处理数
+        if len(university_results) < max_to_process:
+            for i, result, url, score, is_official, is_unofficial in scored_results:
+                if not is_official and not is_unofficial and score > 30 and len(university_results) < max_to_process:
                     university_results.append((i, result, url))
         
-        # 对大学网站结果进行处理，限制处理数量
+        # 检查是否找到了合适的网站
         with main_container:
             if university_results:
                 status_text.info(f"找到 {len(university_results)} 个大学相关网站，开始获取详细内容...")
             else:
-                status_text.warning("未找到大学相关网站，跳过内容增强步骤")
+                status_text.warning("未找到适合的大学网站，跳过内容增强步骤")
                 enrich_progress.progress(100)
                 return search_results
         
         # 创建任务列表，准备并行处理
         tasks = []
-        for i, result, url in university_results[:max_to_process]:
+        for i, result, url in university_results:
             # 标记URL为已处理
             processed_urls.add(url)
             tasks.append((i, result, url))
         
-        # 逐个处理任务，避免并行导致的TaskGroup错误
+        # 逐个处理任务
         for idx, (i, result, url) in enumerate(tasks):
             # 更新进度
             task_progress = 20 + (idx * 80 // len(tasks))
@@ -996,8 +1067,9 @@ class SerperClient:
                     
                     # 添加到搜索结果
                     search_results['organic'][i]['page_content'] = page_content
+                    search_results['organic'][i]['is_official'] = url in [r[2] for r in university_results if r[0] == i]
                     
-                    # 对抓取的大学网站增加权重（通过复制结果或移动到前面）
+                    # 对抓取的官方大学网站增加权重 - 移到前面
                     if i > 0:
                         # 创建副本并移到前面
                         university_entry = search_results['organic'][i].copy()
@@ -1022,6 +1094,20 @@ class SerperClient:
                         
                 # 出错后等待略长时间，以便系统恢复
                 await asyncio.sleep(1)
+        
+        # 重新排序搜索结果 - 官方网站优先
+        # 创建新的排序结果列表
+        official_results = []
+        other_results = []
+        
+        for result in search_results['organic']:
+            if result.get('is_official', False):
+                official_results.append(result)
+            else:
+                other_results.append(result)
+        
+        # 重建结果列表，官方在前
+        search_results['organic'] = official_results + other_results
         
         # 完成增强
         with main_container:
@@ -2146,12 +2232,39 @@ class SerperClient:
         Returns:
             Dict[str, Any]: 包含搜索结果和抓取内容的字典
         """
-        # 首先进行搜索
+        # 首先进行搜索，使用新的search方法获取优化查询结果
         search_results = await self.search(query, num_results)
         if not search_results or not search_results.get("organic", []):
             return {"error": "搜索失败或没有结果"}
             
         organic_results = search_results.get("organic", [])
+        
+        # 过滤结果，移除明显的非官方或低质量网站
+        filtered_results = []
+        excluded_domains = [
+            'quora.com', 'reddit.com', 'wikipedia.org', 'youtube.com', 
+            'facebook.com', 'twitter.com', 'instagram.com',
+            'studyportals.com', 'mastersportal.com', 'topuniversities.com'
+        ]
+        
+        for result in organic_results:
+            url = result.get("link", "")
+            # 检查是否应该排除该网站
+            should_exclude = any(domain in url.lower() for domain in excluded_domains)
+            
+            if not should_exclude:
+                filtered_results.append(result)
+            else:
+                print(f"排除非官方网站: {url}")
+        
+        # 如果过滤后没有结果，则使用原始结果
+        if not filtered_results:
+            print("过滤后没有结果，使用原始结果")
+            filtered_results = organic_results
+        
+        # 更新搜索结果
+        search_results["organic"] = filtered_results
+        organic_results = filtered_results
         
         # 提取要抓取的URL
         urls_to_scrape = []
@@ -2181,3 +2294,41 @@ class SerperClient:
             "query": query,
             "organic": organic_results
         }
+
+    async def search(self, query: str, num_results: int = 5, main_container=None) -> Dict[str, Any]:
+        """
+        搜索方法 - 直接调用search_web并添加优化的查询
+        
+        Args:
+            query: 搜索查询
+            num_results: 结果数量
+            main_container: 显示容器
+            
+        Returns:
+            搜索结果
+        """
+        # 检查是否应该优化查询以获取更多官方网站
+        optimized_query = query
+        
+        # 添加官方网站关键字以获得更多官方结果
+        if any(term in query.lower() for term in ["university", "college", "msc", "master", "program", "degree"]):
+            # 检查查询中是否有具体大学名称
+            uni_names = ["harvard", "stanford", "mit", "oxford", "cambridge", "yale", "princeton", 
+                         "columbia", "ucla", "berkeley", "imperial", "ucl", "eth", "lse"]
+            
+            has_uni_name = any(name in query.lower() for name in uni_names)
+            
+            # 如果查询已经包含大学名称，优化为查找官方信息
+            if has_uni_name:
+                optimized_query = f"{query} official site"
+            # 否则，可能是一般性查询，添加大学关键词
+            else:
+                # 检查查询中是否已经有官方关键词
+                if not any(term in query.lower() for term in ["official", "site", "website", "admission"]):
+                    optimized_query = f"{query} official university information"
+        
+        print(f"原始查询: {query}")
+        print(f"优化查询: {optimized_query}")
+        
+        # 调用现有的搜索web方法
+        return await self.search_web(optimized_query, main_container)
