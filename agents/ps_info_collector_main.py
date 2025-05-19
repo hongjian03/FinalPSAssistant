@@ -133,48 +133,42 @@ class PSInfoCollectorMain:
                 if progress_callback:
                     progress_callback(85, "Agent 1.1：搜索补充信息页面...")
                 
-                # 为每个缺失项找一个最佳URL
-                for field in missing_fields:
-                    field_name = field[0] if isinstance(field, tuple) else field
+                # 不再为每个缺失项单独搜索，而是按类型分组搜索
+                # 将缺失字段分组
+                admission_fields = [f for f in missing_fields if f in ["学历背景", "语言要求(雅思/托福分数)", "GPA要求", "其他学术标准"]]
+                application_fields = [f for f in missing_fields if f in ["申请截止日期", "所需材料", "申请费用"]]
+                program_fields = [f for f in missing_fields if f in ["项目特色", "特色课程", "实习或研究机会"]]
+                contact_fields = [f for f in missing_fields if f in ["联系方式", "重要链接"]]
+                
+                # 定义最多4个搜索组
+                search_groups = []
+                if admission_fields:
+                    search_groups.append(("入学要求", admission_fields, "admission requirements entry criteria"))
+                if application_fields:
+                    search_groups.append(("申请流程", application_fields, "application process deadline procedure documents"))
+                if program_fields:
+                    search_groups.append(("项目特色", program_fields, "program structure features courses specialization"))
+                if contact_fields:
+                    search_groups.append(("联系信息", contact_fields, "contact information faculty staff"))
+                
+                # 为每个组只执行一次搜索
+                for group_name, fields, keywords in search_groups:
                     with search_container:
-                        st.info(f"搜索补充信息: {field_name}")
-                    
-                    # 针对缺失项生成更细致的搜索词
-                    keywords = ""
-                    if "项目概览" in field_name:
-                        keywords = "program overview introduction about"
-                    elif "申请要求" in field_name:
-                        keywords = "admission requirements entry criteria"
-                    elif "申请流程" in field_name:
-                        keywords = "application process deadline procedure"
-                    elif "课程设置" in field_name:
-                        keywords = "curriculum syllabus course structure modules"
-                    elif "相关资源" in field_name:
-                        keywords = "resources contact faculty staff"
-                    
-                    if university.lower().split()[0].endswith('y'):
-                        domain = f"{university.lower().split()[0][:-1]}ies"
-                    else:
-                        domain = f"{university.lower().split()[0]}"
+                        st.info(f"搜索补充信息组: {group_name} - 包含 {', '.join(fields)}")
                     
                     sub_query = f"{university} {major} {keywords}"
                     sub_results = await self.serper_client.search_web(sub_query, main_container=search_container)
                     
-                    # 为每个缺失项只找一个最相关的URL
-                    field_url = None
+                    # 从搜索结果中找最好的URL
                     if sub_results and "organic" in sub_results:
-                        for res in sub_results.get("organic", [])[:1]:  # 只考虑第一个结果
+                        for i, res in enumerate(sub_results.get("organic", [])[:2]):  # 每组最多取前2个结果
                             url = res.get("link")
                             if url and url != main_url and url not in urls_for_deep:
-                                field_url = url
+                                urls_for_deep.append(url)
                                 break
-                    
-                    # 将找到的URL加入总列表
-                    if field_url:
-                        urls_for_deep.append(field_url)
                 
                 # 去重并限制URL数量，避免过多抓取
-                urls_for_deep = list(set(urls_for_deep))[:self.max_urls_to_search]  # 最多max_urls_to_search个补充URL
+                urls_for_deep = list(set(urls_for_deep))[:self.max_urls_to_search]
                 
                 with search_container:
                     st.success(f"已找到 {len(urls_for_deep)} 个补充页面")
