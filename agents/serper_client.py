@@ -1969,3 +1969,215 @@ class SerperClient:
                 else:
                     # 配置不允许回退，返回错误信息
                     return f"# 抓取错误\n\n处理 {url} 时发生异常: {str(e)}\n\n未启用回退到直接抓取。"
+
+    async def _jina_reader_scrape(self, url: str) -> str:
+        """
+        使用Jina Reader API抓取URL内容
+        
+        Args:
+            url: 要抓取的URL
+        
+        Returns:
+            str: 抓取到的Markdown格式内容
+        """
+        jina_url = f"{JINA_CONFIG['base_url']}?url={url}"
+        timeout = JINA_CONFIG['request']['timeout']
+        max_retries = JINA_CONFIG['request']['max_retries']
+        headers = JINA_CONFIG['request']['headers']
+        
+        async with aiohttp.ClientSession() as session:
+            for attempt in range(max_retries + 1):
+                try:
+                    async with session.get(jina_url, headers=headers, timeout=timeout) as response:
+                        if response.status == 200:
+                            content = await response.text()
+                            
+                            # 如果启用了简化输出，处理内容以减少大小
+                            if JINA_CONFIG['features'].get('simplified_output', False):
+                                # 删除多余的空行
+                                content = re.sub(r'\n{3,}', '\n\n', content)
+                                # 简化图片描述
+                                content = re.sub(r'!\[.*?\]', '![Image]', content)
+                                # 限制内容长度
+                                if len(content) > 25000:
+                                    content = content[:25000] + "\n\n...(内容已截断)..."
+                            
+                            return content
+                        else:
+                            print(f"Jina Reader抓取失败，状态码: {response.status}")
+                            if attempt < max_retries:
+                                await asyncio.sleep(1)  # 失败后短暂等待
+                            
+                except asyncio.TimeoutError:
+                    print(f"Jina Reader请求超时 (尝试 {attempt+1}/{max_retries+1})")
+                    if attempt < max_retries:
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    print(f"Jina Reader抓取异常: {str(e)}")
+                    if attempt < max_retries:
+                        await asyncio.sleep(1)
+                        
+        return ""
+
+    async def scrape_url(self, url: str) -> str:
+        """
+        抓取URL内容 - 使用Jina Reader作为主要抓取方法
+        
+        Args:
+            url: 要抓取的URL
+        
+        Returns:
+            str: 抓取到的内容
+        """
+        # 检查URL有效性
+        if not url or not url.startswith(('http://', 'https://')):
+            return "无效URL"
+            
+        print(f"开始使用Jina Reader抓取: {url}")
+        
+        # 使用Jina Reader API抓取
+        content = await self._jina_reader_scrape(url)
+        
+        # 如果Jina Reader成功获取内容
+        if content:
+            print("Jina Reader抓取成功")
+            return content
+        
+        # 如果配置允许回退到直接抓取
+        if JINA_CONFIG['features'].get('fallback_to_direct', True):
+            print("Jina Reader抓取失败，切换到直接抓取")
+            # 使用直接抓取作为后备方案
+            try:
+                response = requests.get(url, headers=JINA_CONFIG['request']['headers'], 
+                                        timeout=JINA_CONFIG['request']['timeout'])
+                if response.status_code == 200:
+                    from bs4 import BeautifulSoup
+                    import chardet
+                    
+                    # 检测编码
+                    encoding = chardet.detect(response.content)['encoding'] or 'utf-8'
+                    
+                    # 解析HTML
+                    soup = BeautifulSoup(response.content.decode(encoding, errors='ignore'), 'html.parser')
+                    
+                    # 提取正文内容
+                    for tag in soup(['script', 'style', 'head', 'header', 'footer', 'nav']):
+                        tag.extract()
+                    
+                    # 提取主要内容
+                    main_content = soup.find('main') or soup.find('article') or soup.find('div', class_='content') or soup.body
+                    
+                    if main_content:
+                        # 转换为Markdown格式
+                        text = main_content.get_text('\n', strip=True)
+                        paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+                        markdown = '\n\n'.join(paragraphs)
+                        
+                        # 提取标题
+                        title = soup.title.string if soup.title else ""
+                        if title:
+                            markdown = f"# {title.strip()}\n\n{markdown}"
+                            
+                        return markdown
+                    else:
+                        return "抓取格式错误"
+                else:
+                    return "抓取错误: HTTP状态码 " + str(response.status_code)
+            except Exception as e:
+                return f"抓取异常: {str(e)}"
+        
+        return "抓取失败"
+
+    async def search_and_scrape_multi(self, query: str, urls_to_scrape: List[str]) -> Dict[str, str]:
+        """
+        并行抓取多个URL的内容
+        
+        Args:
+            query: 搜索查询
+            urls_to_scrape: 要抓取的URL列表
+            
+        Returns:
+            Dict[str, str]: URL和抓取内容的映射
+        """
+        results = {}
+        
+        # 如果启用并行处理
+        if JINA_CONFIG['features'].get('parallel_processing', False):
+            max_concurrent = JINA_CONFIG['features'].get('max_concurrent_requests', 3)
+            # 创建协程任务列表
+            tasks = []
+            for url in urls_to_scrape:
+                tasks.append(self._jina_reader_scrape(url))
+                
+            # 并行执行任务，但限制并发数
+            for i in range(0, len(tasks), max_concurrent):
+                batch = tasks[i:i+max_concurrent]
+                batch_results = await asyncio.gather(*batch)
+                
+                # 添加结果到字典
+                for j, content in enumerate(batch_results):
+                    url_index = i + j
+                    if url_index < len(urls_to_scrape):
+                        url = urls_to_scrape[url_index]
+                        if content:
+                            results[url] = content
+                        else:
+                            # 如果Jina失败，尝试直接抓取
+                            if JINA_CONFIG['features'].get('fallback_to_direct', True):
+                                print(f"Jina Reader抓取{url}失败，切换到直接抓取")
+                                results[url] = await self.scrape_url(url)
+        else:
+            # 顺序抓取
+            for url in urls_to_scrape:
+                content = await self.scrape_url(url)
+                if content:
+                    results[url] = content
+                    
+        return results
+
+    async def search_and_scrape(self, query: str, num_results: int = 5) -> Dict[str, Any]:
+        """
+        搜索并抓取结果
+        
+        Args:
+            query: 搜索查询
+            num_results: 搜索结果数量
+            
+        Returns:
+            Dict[str, Any]: 包含搜索结果和抓取内容的字典
+        """
+        # 首先进行搜索
+        search_results = await self.search(query, num_results)
+        if not search_results or not search_results.get("organic", []):
+            return {"error": "搜索失败或没有结果"}
+            
+        organic_results = search_results.get("organic", [])
+        
+        # 提取要抓取的URL
+        urls_to_scrape = []
+        for result in organic_results:
+            url = result.get("link")
+            if url:
+                urls_to_scrape.append(url)
+                
+        # 并行抓取URL内容
+        print(f"正在抓取 {len(urls_to_scrape)} 个URL...")
+        
+        scraped_contents = {}
+        
+        # 使用并行抓取来提高性能
+        if urls_to_scrape:
+            scraped_contents = await self.search_and_scrape_multi(query, urls_to_scrape)
+                
+        # 将抓取内容添加到搜索结果中
+        for result in organic_results:
+            url = result.get("link")
+            if url in scraped_contents:
+                result["scraped_content"] = scraped_contents[url]
+            else:
+                result["scraped_content"] = ""
+                
+        return {
+            "query": query,
+            "organic": organic_results
+        }
