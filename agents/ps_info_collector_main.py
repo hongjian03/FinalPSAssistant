@@ -13,13 +13,22 @@ class PSInfoCollectorMain:
     """
     Agent 1.1: 负责搜索课程介绍主网页，生成初步院校信息报告，标注缺失项和待补全URL。
     """
-    def __init__(self, model_name=None):
+    def __init__(self, model_name=None, max_urls_to_search=5):
+        """
+        初始化Agent 1.1
+        
+        Args:
+            model_name: 要使用的AI模型名称
+            max_urls_to_search: 最多搜索的补充URL数量（默认为5）
+        """
         self.model_name = model_name if model_name else "anthropic/claude-3-7-sonnet"
         self.api_key = st.secrets.get("OPENROUTER_API_KEY", "")
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.serper_client = SerperClient()
         # 加载提示词配置
         self.prompts = load_prompts().get("ps_info_collector_main", {})
+        # 最大补充URL数量限制
+        self.max_urls_to_search = max_urls_to_search
 
     async def collect_main_info(self, university: str, major: str, custom_requirements: str = "", progress_callback: Optional[Callable[[int, str], None]] = None) -> Dict[str, Any]:
         """
@@ -163,7 +172,7 @@ class PSInfoCollectorMain:
                     urls_for_deep.extend(field_urls)
                 
                 # 去重并限制URL数量，避免过多抓取
-                urls_for_deep = list(set(urls_for_deep))[:5]  # 最多5个补充URL
+                urls_for_deep = list(set(urls_for_deep))[:self.max_urls_to_search]  # 最多max_urls_to_search个补充URL
                 
                 with search_container:
                     st.success(f"已找到 {len(urls_for_deep)} 个补充页面")
