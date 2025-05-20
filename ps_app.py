@@ -568,7 +568,9 @@ def main():
         st.markdown("---")
         
         # 加载当前提示词
-        prompts = load_prompts()
+        if "prompts" not in st.session_state:
+            st.session_state["prompts"] = load_prompts()
+        prompts = st.session_state["prompts"]
         
         # 新增Agent 1.1调试区域
         st.subheader("主网页信息收集代理 (Agent 1.1)")
@@ -603,7 +605,6 @@ def main():
         # 保存按钮
         if st.button("保存提示词"):
             # 更新提示词字典
-            # 新增/保存1.1和1.2
             if "ps_info_collector_main" not in prompts:
                 prompts["ps_info_collector_main"] = {}
             if "ps_info_collector_deep" not in prompts:
@@ -614,21 +615,16 @@ def main():
             prompts["ps_info_collector_deep"]["role"] = info_collector_deep_role
             prompts["ps_info_collector_deep"]["task"] = info_collector_deep_task
             prompts["ps_info_collector_deep"]["output"] = info_collector_deep_output
-            
             prompts["supporting_file_analyzer"]["role"] = supporting_analyzer_role
             prompts["supporting_file_analyzer"]["task"] = supporting_analyzer_task
             prompts["supporting_file_analyzer"]["output"] = supporting_analyzer_output
-            
             prompts["ps_analyzer"]["role"] = ps_analyzer_role
             prompts["ps_analyzer"]["task"] = ps_analyzer_task
             prompts["ps_analyzer"]["output"] = ps_analyzer_output
-            
             prompts["ps_rewriter"]["role"] = ps_rewriter_role
             prompts["ps_rewriter"]["task"] = ps_rewriter_task
             prompts["ps_rewriter"]["output"] = ps_rewriter_output
-            
-            # 保存更新后的提示词
-            save_prompts(prompts)
+            st.session_state["prompts"] = prompts
             st.success("提示词已成功保存！")
 
     with tab3:

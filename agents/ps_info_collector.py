@@ -400,18 +400,14 @@ class PSInfoCollector:
             return error_msg
     
     def _build_info_prompt(self, university: str, major: str, search_results: Dict[str, Any], custom_requirements: str) -> str:
-        """
-        构建用于生成院校信息报告的提示。
+        prompts = st.session_state.get("prompts")
+        if not prompts:
+            from config.prompts import DEFAULT_PROMPTS
+            prompts = DEFAULT_PROMPTS
+        role = prompts["ps_info_collector"]["role"]
+        task = prompts["ps_info_collector"]["task"]
+        output_format = prompts["ps_info_collector"]["output"]
         
-        Args:
-            university: 目标大学
-            major: 目标专业
-            search_results: Web搜索结果
-            custom_requirements: 用户的自定义要求
-            
-        Returns:
-            生成的提示文本
-        """
         # 准备搜索结果摘要
         search_content = ""
         
@@ -501,22 +497,6 @@ class PSInfoCollector:
             请在你的分析中考虑这些特定要求。
             """
             
-        # 从配置文件加载提示词
-        import os
-        import sys
-        import json
-        
-        # 添加父目录到路径以便正确导入
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-        from config.prompts import load_prompts
-        
-        prompts = load_prompts()
-        
-        # 获取PSInfoCollector的角色、任务和输出格式提示词
-        role = prompts["ps_info_collector"]["role"]
-        task = prompts["ps_info_collector"]["task"]
-        output_format = prompts["ps_info_collector"]["output"]
-        
         # 构建最终提示
         prompt = f"""
         # 角色: 院校信息收集专家

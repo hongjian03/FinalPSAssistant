@@ -105,60 +105,28 @@ class SupportingFileAnalyzer:
         return content
     
     def _build_analysis_prompt(self, file_contents: List[Dict[str, str]]) -> str:
-        """构建分析提示"""
+        prompts = st.session_state.get("prompts")
+        if not prompts:
+            from config.prompts import DEFAULT_PROMPTS
+            prompts = DEFAULT_PROMPTS
+        role = prompts["supporting_file_analyzer"]["role"]
+        task = prompts["supporting_file_analyzer"]["task"]
+        output_format = prompts["supporting_file_analyzer"]["output"]
         # 格式化所有文件内容
         formatted_contents = ""
         for i, file_data in enumerate(file_contents, 1):
             formatted_contents += f"文件 {i}: {file_data['filename']}\n内容:\n{file_data['content']}\n\n{'='*50}\n\n"
-        
-        # 构建完整提示
         prompt = f"""
         # 角色: 学术支持材料分析专家
-        
-        你是一位专业的学术申请顾问，专长于分析申请者提供的支持材料，并提取其中对个人陈述(PS)撰写有帮助的关键信息和亮点。
-        
+        {role}
         # 任务
-        
-        请仔细分析提供的所有支持文件内容，提取以下关键信息：
-        
-        1. 学术成就与表现：GPA、专业排名、获得的奖学金或荣誉等
-        2. 研究经历：参与的研究项目、发表的论文、学术会议等
-        3. 实习与工作经验：相关的工作经历、实习项目、职责与成就
-        4. 技能与专长：专业技能、语言能力、软件/工具掌握程度等
-        5. 课外活动：社团参与、志愿服务、领导经历等
-        6. 个人特质：从材料中可以推断的性格特点、专业素养等
-        
+        {task}
         # 支持文件内容
-        
         以下是申请者提供的支持文件内容:
-        
         {formatted_contents}
-        
         # 输出格式
-        
-        请将你的分析整理为一份专业的支持文件分析报告，格式如下：
-        
-        # 支持文件分析报告
-        
-        ## 文件概览
-        [简要描述分析的文件类型及总体评价]
-        
-        ## 学术背景摘要
-        [总结学术表现、专业方向、成绩等信息]
-        
-        ## 研究与专业经验
-        [详述研究项目、实习、工作经验等]
-        
-        ## 技能与专长
-        [列出技术技能、软技能、语言能力等]
-        
-        ## 个人特质与亮点
-        [分析材料中体现的个人特质和突出亮点]
-        
-        ## PS撰写建议
-        [基于支持材料，提出5-8点个人陈述撰写建议]
+        {output_format}
         """
-        
         return prompt
     
     def _call_openrouter_api(self, prompt: str) -> str:

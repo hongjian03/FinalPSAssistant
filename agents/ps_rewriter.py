@@ -53,18 +53,10 @@ class PSRewriter:
     
     def _build_rewrite_prompt(self, ps_content: str, rewrite_strategy: str, university_info: str) -> str:
         """构建改写提示"""
-        # 从配置文件加载提示词
-        import os
-        import sys
-        import json
-        
-        # 添加父目录到路径以便正确导入
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-        from config.prompts import load_prompts
-        
-        prompts = load_prompts()
-        
-        # 获取PSRewriter的角色、任务和输出格式提示词
+        prompts = st.session_state.get("prompts")
+        if not prompts:
+            from config.prompts import DEFAULT_PROMPTS
+            prompts = DEFAULT_PROMPTS
         role = prompts["ps_rewriter"]["role"]
         task = prompts["ps_rewriter"]["task"]
         output_format = prompts["ps_rewriter"]["output"]

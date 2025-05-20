@@ -6,7 +6,6 @@ import json
 import traceback
 from typing import Dict, Any, List, Optional, Callable
 from .serper_client import SerperClient
-from config.prompts import load_prompts
 
 class PSInfoCollectorDeep:
     """
@@ -25,7 +24,11 @@ class PSInfoCollectorDeep:
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.serper_client = SerperClient()
         # 加载提示词配置
-        self.prompts = load_prompts().get("ps_info_collector_deep", {})
+        prompts = st.session_state.get("prompts")
+        if not prompts:
+            from config.prompts import DEFAULT_PROMPTS
+            prompts = DEFAULT_PROMPTS
+        self.prompts = prompts.get("ps_info_collector_deep", {})
         # 最大处理URL数量限制
         self.max_urls_to_process = max_urls_to_process
 

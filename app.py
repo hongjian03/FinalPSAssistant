@@ -125,7 +125,7 @@ async def init_serper():
                 progress_bar.progress(20)
                 status_text.info("创建Serper MCP客户端实例...")
                 
-    serper_client = SerperClient()
+            serper_client = SerperClient()
             
             # 尝试初始化，传递主容器以便在其中显示进度
             with progress_container:
@@ -243,7 +243,7 @@ def main():
     tab1, tab2, tab3 = st.tabs(["Competitiveness Analysis", "Prompt Debugging", "System Status"])
     
     # 首次加载应用时尝试初始化Serper客户端（仅执行一次）
-    if "serper_initialized" not in st.session_state:
+    if "serper_init_attempted" not in st.session_state:
         st.session_state.serper_initialized = False
         st.session_state.serper_init_attempted = False
     
