@@ -101,12 +101,28 @@ class PSInfoCollectorMain:
                 try:
                     # 使用jina_reader_scrape替代scrape_url
                     main_content = await self.serper_client.jina_reader_scrape(main_url, main_container=search_container)
+                    
+                    # 添加可展开区域显示原始抓取内容
+                    with search_container:
+                        with st.expander(f"主网页（{main_url}）原始内容", expanded=False):
+                            st.markdown("### 抓取到的原始内容")
+                            st.markdown(f"**URL**: [{main_url}]({main_url})")
+                            st.text_area("内容预览", main_content, height=300)
+                            
                 except Exception as e:
                     # 如果Jina Reader失败，尝试直接抓取
                     with search_container:
                         st.warning(f"Jina Reader抓取失败: {str(e)}，尝试直接抓取")
                     try:
                         main_content = await self.serper_client.direct_scrape(main_url, main_container=search_container)
+                        
+                        # 添加可展开区域显示直接抓取的内容
+                        with search_container:
+                            with st.expander(f"主网页（{main_url}）原始内容（直接抓取）", expanded=False):
+                                st.markdown("### 抓取到的原始内容")
+                                st.markdown(f"**URL**: [{main_url}]({main_url})")
+                                st.text_area("内容预览", main_content, height=300)
+                                
                     except Exception as direct_error:
                         with search_container:
                             st.error(f"所有抓取方法均失败: {str(direct_error)}")
